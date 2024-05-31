@@ -602,6 +602,52 @@ func (s *RewardsTestSuite) TestStandardRewardEmissionShouldRewardTopicsWithFulfi
 	)
 }
 
+func (s *RewardsTestSuite) getWorkersReputersAddress(workersCount int, startIndex ...int) (
+	workerAddress []sdk.AccAddress,
+	reputerAddress []sdk.AccAddress,
+) {
+	var start = 0
+	if len(startIndex) > 0 {
+		start = startIndex[0]
+	}
+	if len(s.addrs) < start+workersCount*2 {
+		s.Fail("Need to increase test accounts")
+	}
+	workerAddress = s.addrs[start:workersCount]
+	reputerAddress = s.addrs[start+workersCount : start+workersCount*2]
+
+	return workerAddress, reputerAddress
+}
+
+func (s *RewardsTestSuite) getWorkersReputersValues(workersCount int) (
+	workerValues []TestWorkerValue,
+	reputerValues []TestWorkerValue,
+) {
+	workerAddress, reputerAddress := s.getWorkersReputersAddress(workersCount)
+	workerValues = make([]TestWorkerValue, 0)
+	reputerValues = make([]TestWorkerValue, 0)
+
+	buildValues := func(values []TestWorkerValue, addresses []sdk.AccAddress) []TestWorkerValue {
+		index := 0
+		for {
+			values = append(values, TestWorkerValue{
+				Address: addresses[index],
+				Value:   fmt.Sprint(0.1 * float64(index+1)),
+			})
+			index++
+			if index == workersCount {
+				break
+			}
+		}
+		return values
+	}
+
+	workerValues = buildValues(workerValues, workerAddress)
+	reputerValues = buildValues(reputerValues, reputerAddress)
+
+	return workerValues, reputerValues
+}
+
 func (s *RewardsTestSuite) setUpTopic(
 	blockHeight int64,
 	workerAddrs []sdk.AccAddress,
@@ -824,35 +870,15 @@ func (s *RewardsTestSuite) TestFixingTaskRewardAlphaDoesNotChangePerformanceImpo
 	blockHeight0 := int64(100)
 	blockHeightDelta := int64(1)
 	s.ctx = s.ctx.WithBlockHeight(blockHeight0)
-
-	workerAddrs := []sdk.AccAddress{
-		s.addrs[0],
-		s.addrs[1],
-		s.addrs[2],
-	}
-
-	reputerAddrs := []sdk.AccAddress{
-		s.addrs[3],
-		s.addrs[4],
-		s.addrs[5],
-	}
+	workerCount := 3
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
 
 	stake := cosmosMath.NewInt(1000000000000000000).Mul(inference_synthesis.CosmosIntOneE18())
 
 	alphaRegret := alloraMath.MustNewDecFromString("0.1")
 	topicId := s.setUpTopic(blockHeight0, workerAddrs, reputerAddrs, stake, alphaRegret)
 
-	workerValues := []TestWorkerValue{
-		{Address: s.addrs[0], Value: "0.1"},
-		{Address: s.addrs[1], Value: "0.2"},
-		{Address: s.addrs[2], Value: "0.3"},
-	}
-
-	reputerValues := []TestWorkerValue{
-		{Address: s.addrs[3], Value: "0.1"},
-		{Address: s.addrs[4], Value: "0.2"},
-		{Address: s.addrs[5], Value: "0.3"},
-	}
+	workerValues, reputerValues := s.getWorkersReputersValues(workerCount)
 
 	currentParams.TaskRewardAlpha = alloraMath.MustNewDecFromString(("0.1"))
 	err = k.SetParams(s.ctx, currentParams)
@@ -935,35 +961,15 @@ func (s *RewardsTestSuite) TestIncreasingTaskRewardAlphaIncreasesImportanceOfPre
 	blockHeight0 := int64(100)
 	blockHeightDelta := int64(1)
 	s.ctx = s.ctx.WithBlockHeight(blockHeight0)
+	workerCount := 3
 
-	workerAddrs := []sdk.AccAddress{
-		s.addrs[0],
-		s.addrs[1],
-		s.addrs[2],
-	}
-
-	reputerAddrs := []sdk.AccAddress{
-		s.addrs[3],
-		s.addrs[4],
-		s.addrs[5],
-	}
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
 
 	stake := cosmosMath.NewInt(1000000000000000000).Mul(inference_synthesis.CosmosIntOneE18())
 
 	alphaRegret := alloraMath.MustNewDecFromString("0.1")
 	topicId := s.setUpTopic(blockHeight0, workerAddrs, reputerAddrs, stake, alphaRegret)
-
-	workerValues := []TestWorkerValue{
-		{Address: s.addrs[0], Value: "0.1"},
-		{Address: s.addrs[1], Value: "0.2"},
-		{Address: s.addrs[2], Value: "0.3"},
-	}
-
-	reputerValues := []TestWorkerValue{
-		{Address: s.addrs[3], Value: "0.1"},
-		{Address: s.addrs[4], Value: "0.2"},
-		{Address: s.addrs[5], Value: "0.3"},
-	}
+	workerValues, reputerValues := s.getWorkersReputersValues(workerCount)
 
 	currentParams.TaskRewardAlpha = alloraMath.MustNewDecFromString("0.1")
 	err = k.SetParams(s.ctx, currentParams)
@@ -1082,35 +1088,16 @@ func (s *RewardsTestSuite) TestIncreasingAlphaRegretIncreasesPresentEffectOnRegr
 	blockHeight0 := int64(100)
 	blockHeightDelta := int64(1)
 	s.ctx = s.ctx.WithBlockHeight(blockHeight0)
+	workerCount := 3
 
-	workerAddrs := []sdk.AccAddress{
-		s.addrs[0],
-		s.addrs[1],
-		s.addrs[2],
-	}
-
-	reputerAddrs := []sdk.AccAddress{
-		s.addrs[3],
-		s.addrs[4],
-		s.addrs[5],
-	}
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
 
 	stake := cosmosMath.NewInt(1000000000000000000).Mul(inference_synthesis.CosmosIntOneE18())
 
 	alphaRegret := alloraMath.MustNewDecFromString("0.1")
 	topicId0 := s.setUpTopic(blockHeight0, workerAddrs, reputerAddrs, stake, alphaRegret)
 
-	workerValues := []TestWorkerValue{
-		{Address: s.addrs[0], Value: "0.1"},
-		{Address: s.addrs[1], Value: "0.2"},
-		{Address: s.addrs[2], Value: "0.3"},
-	}
-
-	reputerValues := []TestWorkerValue{
-		{Address: s.addrs[3], Value: "0.1"},
-		{Address: s.addrs[4], Value: "0.2"},
-		{Address: s.addrs[5], Value: "0.3"},
-	}
+	workerValues, reputerValues := s.getWorkersReputersValues(workerCount)
 
 	topic, err := k.GetTopic(s.ctx, topicId0)
 	s.Require().NoError(err)
@@ -1536,24 +1523,9 @@ func (s *RewardsTestSuite) TestRewardsIncreasesBalance() {
 	epochLength := int64(10800)
 	s.MintTokensToModule(types.AlloraStakingAccountName, cosmosMath.NewInt(10000000000))
 
-	// Reputer Addresses
-	reputerAddrs := []sdk.AccAddress{
-		s.addrs[0],
-		s.addrs[1],
-		s.addrs[2],
-		s.addrs[3],
-		s.addrs[4],
-	}
+	workerCount := 5
 
-	// Worker Addresses
-	workerAddrs := []sdk.AccAddress{
-		s.addrs[5],
-		s.addrs[6],
-		s.addrs[7],
-		s.addrs[8],
-		s.addrs[9],
-	}
-
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
 	// Create topic
 	newTopicMsg := &types.MsgCreateNewTopic{
 		Creator:         reputerAddrs[0].String(),
@@ -1718,23 +1690,9 @@ func (s *RewardsTestSuite) TestRewardsHandleStandardDeviationOfZero() {
 	s.ctx = s.ctx.WithBlockHeight(block)
 	epochLength := int64(10800)
 
-	// Reputer Addresses
-	reputerAddrs := []sdk.AccAddress{
-		s.addrs[0],
-		s.addrs[1],
-		s.addrs[2],
-		s.addrs[3],
-		s.addrs[4],
-	}
+	workerCount := 5
 
-	// Worker Addresses
-	workerAddrs := []sdk.AccAddress{
-		s.addrs[5],
-		s.addrs[6],
-		s.addrs[7],
-		s.addrs[8],
-		s.addrs[9],
-	}
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
 
 	// Create first topic
 	newTopicMsg := &types.MsgCreateNewTopic{
@@ -2108,14 +2066,13 @@ func (s *RewardsTestSuite) TestOnlyFewTopActorsGetReward() {
 	epochLength := int64(10800)
 
 	// Reputer Addresses
-	var reputerAddrs = make([]sdk.AccAddress, 0)
-	var workerAddrs = make([]sdk.AccAddress, 0)
 	var stakes = make([]cosmosMath.Int, 0)
 	cosmosOneE18 := inference_synthesis.CosmosIntOneE18()
 
-	for i := 0; i < 25; i++ {
-		reputerAddrs = append(reputerAddrs, s.addrs[i])
-		workerAddrs = append(workerAddrs, s.addrs[i+25])
+	workerCount := 25
+	workerAddrs, reputerAddrs := s.getWorkersReputersAddress(workerCount)
+
+	for i := 0; i < workerCount; i++ {
 		stakes = append(stakes, cosmosMath.NewInt(int64(1000*(i+1))).Mul(cosmosOneE18))
 	}
 
