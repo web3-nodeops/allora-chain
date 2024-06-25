@@ -866,30 +866,20 @@ func (k *Keeper) RemoveReputerStake(
 	topicId TopicId,
 	reputer ActorId,
 	stakeToRemove cosmosMath.Int) error {
-	fmt.Println("xxxxxxxxxxxxxxxxxxxxxxxxx")
-	fmt.Println("blockHeight", blockHeight)
-	fmt.Println("topicId", topicId)
-	fmt.Println("reputer", reputer)
-	fmt.Println("stakeToRemove", stakeToRemove)
-	fmt.Println("xxxxxxxxxxxxxxxxxxxxxxxxx")
-
 	// CHECKS
 	if stakeToRemove.IsZero() {
 		return nil
 	}
 	// Check reputerAuthority >= stake
 	reputerAuthority, err := k.GetStakeReputerAuthority(ctx, topicId, reputer)
-	fmt.Println("reputerAuthority ", reputerAuthority)
 	if err != nil {
 		return err
 	}
 	delegateStakeUponReputerInTopic, err := k.GetDelegateStakeUponReputer(ctx, topicId, reputer)
-	fmt.Println("delegateStakeUponReputerInTopic ", delegateStakeUponReputerInTopic)
 	if err != nil {
 		return err
 	}
 	reputerStakeInTopicWithoutDelegateStake := reputerAuthority.Sub(delegateStakeUponReputerInTopic)
-	fmt.Println("reputerStakeInTopicWithoutDelegateStake ", reputerStakeInTopicWithoutDelegateStake)
 	if stakeToRemove.GT(reputerStakeInTopicWithoutDelegateStake) {
 		return types.ErrIntegerUnderflowTopicReputerStake
 	}
@@ -897,7 +887,6 @@ func (k *Keeper) RemoveReputerStake(
 
 	// Check topicStake >= stake
 	topicStake, err := k.GetTopicStake(ctx, topicId)
-	fmt.Println("topicStake ", topicStake)
 	if err != nil {
 		return err
 	}
@@ -908,7 +897,6 @@ func (k *Keeper) RemoveReputerStake(
 
 	// Check totalStake >= stake
 	totalStake, err := k.GetTotalStake(ctx)
-	fmt.Println("totalStake")
 	if err != nil {
 		return err
 	}
@@ -953,14 +941,6 @@ func (k *Keeper) RemoveDelegateStake(
 	reputer ActorId,
 	stakeToRemove cosmosMath.Int,
 ) error {
-	fmt.Println("+++++++++++++++++++++++++")
-	fmt.Println("blockHeight", blockHeight)
-	fmt.Println("topicId", topicId)
-	fmt.Println("delegator", delegator)
-	fmt.Println("reputer", reputer)
-	fmt.Println("stakeToRemove", stakeToRemove)
-	fmt.Println("+++++++++++++++++++++++++")
-
 	// CHECKS
 	if stakeToRemove.IsZero() {
 		return nil
@@ -968,7 +948,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// stakeSumFromDelegator >= stake
 	stakeSumFromDelegator, err := k.GetStakeFromDelegatorInTopic(ctx, topicId, delegator)
-	fmt.Println("stakeSumFromDelegator ", stakeSumFromDelegator)
 	if err != nil {
 		return err
 	}
@@ -979,7 +958,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// delegatedStakePlacement >= stake
 	delegatedStakePlacement, err := k.GetDelegateStakePlacement(ctx, topicId, delegator, reputer)
-	fmt.Println("delegatedStakePlacement ", delegatedStakePlacement)
 	if err != nil {
 		return err
 	}
@@ -993,19 +971,16 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// Get share for this topicId and reputer
 	share, err := k.GetDelegateRewardPerShare(ctx, topicId, reputer)
-	fmt.Println("share ", share)
 	if err != nil {
 		return err
 	}
 
 	// Calculate pending reward and send to delegator
 	pendingReward, err := delegatedStakePlacement.Amount.Mul(share)
-	fmt.Println("pendingReward ", pendingReward)
 	if err != nil {
 		return err
 	}
 	pendingReward, err = pendingReward.Sub(delegatedStakePlacement.RewardDebt)
-	fmt.Println("pendingReward2 ", pendingReward)
 	if err != nil {
 		return err
 	}
@@ -1026,12 +1001,10 @@ func (k *Keeper) RemoveDelegateStake(
 	}
 
 	newAmount, err := delegatedStakePlacement.Amount.Sub(unStakeDec)
-	fmt.Println("newAmount ", newAmount)
 	if err != nil {
 		return err
 	}
 	newRewardDebt, err := newAmount.Mul(share)
-	fmt.Println("newRewardDebt ", newRewardDebt)
 	if err != nil {
 		return err
 	}
@@ -1042,7 +1015,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// stakeUponReputer >= stake
 	stakeUponReputer, err := k.GetDelegateStakeUponReputer(ctx, topicId, reputer)
-	fmt.Println("stakesUponReputer ", stakeUponReputer)
 	if err != nil {
 		return err
 	}
@@ -1053,7 +1025,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// stakeReputerAuthority >= stake
 	stakeReputerAuthority, err := k.GetStakeReputerAuthority(ctx, topicId, reputer)
-	fmt.Println("stakeReputerAuthority ", stakeReputerAuthority)
 	if err != nil {
 		return err
 	}
@@ -1064,7 +1035,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// topicStake >= stake
 	topicStake, err := k.GetTopicStake(ctx, topicId)
-	fmt.Println("topicStake ", topicStake)
 	if err != nil {
 		return err
 	}
@@ -1075,7 +1045,6 @@ func (k *Keeper) RemoveDelegateStake(
 
 	// totalStake >= stake
 	totalStake, err := k.GetTotalStake(ctx)
-	fmt.Println("totalStake ", totalStake)
 	if err != nil {
 		return err
 	}

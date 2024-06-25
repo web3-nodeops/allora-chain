@@ -159,7 +159,7 @@ func (ms msgServer) DelegateStake(ctx context.Context, msg *types.MsgDelegateSta
 		return nil, err
 	}
 
-	// update staking data structures
+	// Update the stake data structures
 	err = ms.k.AddDelegateStake(ctx, msg.TopicId, msg.Sender, msg.Reputer, msg.Amount)
 	if err != nil {
 		return nil, err
