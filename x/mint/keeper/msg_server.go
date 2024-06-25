@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 
 	"cosmossdk.io/errors"
 	"github.com/allora-network/allora-chain/x/mint/types"
@@ -23,6 +24,10 @@ func NewMsgServerImpl(k Keeper) types.MsgServer {
 
 // UpdateParams updates the params.
 func (ms msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
+	fmt.Printf("TTTTEEEESSSSTTTT: Update mint Params\nSender: %s\nParams:\n%v\n",
+		msg.Sender,
+		msg.Params,
+	)
 	isAdmin, err := ms.IsWhitelistAdmin(ctx, msg.Sender)
 	if err != nil {
 		return nil, err

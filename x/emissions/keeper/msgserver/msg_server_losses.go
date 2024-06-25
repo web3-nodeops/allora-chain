@@ -20,6 +20,7 @@ func (ms msgServer) InsertBulkReputerPayload(
 	ctx context.Context,
 	msg *types.MsgInsertBulkReputerPayload,
 ) (*types.MsgInsertBulkReputerPayloadResponse, error) {
+	fmt.Printf("TTTEEESSSTTT: InsertBulkReputerPayload\nTopicId: %d\nReputerRequestNonce: %v\nReputerValueBundles: %v\n", msg.TopicId, msg.ReputerRequestNonce, msg.ReputerValueBundles)
 	err := ms.CheckInputLength(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -224,6 +225,7 @@ func (ms msgServer) FilterUnacceptedWorkersFromReputerValueBundle(
 	reputerRequestNonce types.ReputerRequestNonce,
 	reputerValueBundle *types.ReputerValueBundle,
 ) (*types.ReputerValueBundle, error) {
+	fmt.Printf("TTTEEESSSTTT: FilterUnacceptedWorkersFromReputerValueBundle\nTopicId: %d\nReputerRequestNonce: %v\nReputerValueBundle: %v\n", topicId, reputerRequestNonce, reputerValueBundle)
 	// Get the accepted inferers of the associated worker response payload
 	inferences, err := ms.k.GetInferencesAtBlock(ctx, topicId, reputerRequestNonce.WorkerNonce.BlockHeight)
 	if err != nil {

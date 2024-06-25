@@ -2,6 +2,7 @@ package msgserver
 
 import (
 	"context"
+	"fmt"
 
 	appParams "github.com/allora-network/allora-chain/app/params"
 	alloraMath "github.com/allora-network/allora-chain/math"
@@ -11,6 +12,7 @@ import (
 )
 
 func (ms msgServer) FundTopic(ctx context.Context, msg *types.MsgFundTopic) (*types.MsgFundTopicResponse, error) {
+	fmt.Printf("TTTEEESSSTTT: FundTopic\nTopicId: %d\nSender: %s\nAmount: %d\n", msg.TopicId, msg.Sender, msg.Amount)
 	// Check the topic is valid
 	topicExists, err := ms.k.TopicExists(ctx, msg.TopicId)
 	if err != nil {
