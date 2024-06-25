@@ -112,7 +112,7 @@ func EmitRewards(
 		payoutErrors := payoutRewards(ctx, k, totalRewardsDistribution)
 		if len(payoutErrors) > 0 {
 			for _, err := range payoutErrors {
-				Logger(ctx).Warn(
+				Logger(ctx).Error(
 					fmt.Sprintf(
 						"Failed to pay out rewards to participant in Topic:\nTopic Id %d\nTopic Reward Amount %s\nError:\n%s\n\n",
 						topicId,
@@ -423,6 +423,11 @@ func payoutRewards(
 
 		rewardInt := reward.Reward.Abs().SdkIntTrim()
 		coins := sdk.NewCoins(sdk.NewCoin(params.DefaultBondDenom, rewardInt))
+		accAddress, err := sdk.AccAddressFromBech32(reward.Address)
+		if err != nil {
+			ret = append(ret, errors.Wrapf(err, "failed to decode payout address: %s", reward.Address))
+			continue
+		}
 
 		if reward.Type == types.ReputerAndDelegatorRewardType {
 			err := k.SendCoinsFromModuleToModule(ctx, types.AlloraRewardsAccountName, types.AlloraStakingAccountName, coins)
@@ -442,11 +447,6 @@ func payoutRewards(
 
 			reputerAndDelegatorRewards = append(reputerAndDelegatorRewards, reward)
 		} else {
-			accAddress, err := sdk.AccAddressFromBech32(reward.Address)
-			if err != nil {
-				ret = append(ret, errors.Wrapf(err, "failed to decode payout address: %s", reward.Address))
-				continue
-			}
 			err = k.BankKeeper().SendCoinsFromModuleToAccount(
 				ctx,
 				types.AlloraRewardsAccountName,

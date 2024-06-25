@@ -117,6 +117,7 @@ func (k Keeper) MoveCoinsFromMintToEcosystem(ctx context.Context, mintedCoins sd
 	if mintedCoins.Empty() {
 		return nil
 	}
+	fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromModuleToModule <<<<<<<<<<<<<<< %s %s %s\n", types.ModuleName, types.EcosystemModuleName, mintedCoins.String())
 	return k.bankKeeper.SendCoinsFromModuleToModule(
 		ctx,
 		types.ModuleName,
@@ -132,6 +133,7 @@ func (k Keeper) PayValidatorsFromEcosystem(ctx context.Context, rewards sdk.Coin
 	if rewards.Empty() {
 		return nil
 	}
+	//fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromModuleToModule <<<<<<<<<<<<<<< %s %s %s\n", types.EcosystemModuleName, k.feeCollectorName, rewards.String())
 	return k.bankKeeper.SendCoinsFromModuleToModule(
 		ctx,
 		types.EcosystemModuleName,
@@ -147,6 +149,7 @@ func (k Keeper) PayAlloraRewardsFromEcosystem(ctx context.Context, rewards sdk.C
 	if rewards.Empty() {
 		return nil
 	}
+	fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromModuleToModule <<<<<<<<<<<<<<< %s %s %s\n", types.EcosystemModuleName, emissionstypes.AlloraRewardsAccountName, rewards.String())
 	return k.bankKeeper.SendCoinsFromModuleToModule(
 		ctx,
 		types.EcosystemModuleName,
