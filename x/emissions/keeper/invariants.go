@@ -30,7 +30,7 @@ func StakingInvariantTotalStakeEqualAlloraStakingBankBalance(k Keeper) sdk.Invar
 		if err != nil {
 			panic(fmt.Sprintf("failed to get total stake: %v", err))
 		}
-		alloraStakingAddr := k.AccountKeeper().GetModuleAccount(ctx, emissionsTypes.AlloraRewardsAccountName).GetAddress()
+		alloraStakingAddr := k.AccountKeeper().GetModuleAccount(ctx, emissionsTypes.AlloraStakingAccountName).GetAddress()
 		alloraStakingBalance := k.BankKeeper().GetBalance(
 			ctx,
 			alloraStakingAddr,
