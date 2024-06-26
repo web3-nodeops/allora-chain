@@ -14,8 +14,9 @@ import (
 // and none from any unregistered inferer.
 // Signatures, anti-synil procedures, and "skimming of only the top few workers by score
 // descending" should be done here.
-func (ms msgServer) VerifyAndInsertInferencesFromTopInferers(
+func verifyAndInsertInferencesFromTopInferers(
 	ctx context.Context,
+	ms msgServer,
 	topicId uint64,
 	nonce types.Nonce,
 	// inferences []*types.Inference,
@@ -118,8 +119,9 @@ func (ms msgServer) VerifyAndInsertInferencesFromTopInferers(
 // and none from any unregistered forecaster.
 // Signatures, anti-synil procedures, and "skimming of only the top few workers by score
 // descending" should be done here.
-func (ms msgServer) VerifyAndInsertForecastsFromTopForecasters(
+func verifyAndInsertForecastsFromTopForecasters(
 	ctx context.Context,
+	ms msgServer,
 	topicId uint64,
 	nonce types.Nonce,
 	workerDataBundle []*types.WorkerDataBundle,
@@ -223,7 +225,7 @@ func (ms msgServer) VerifyAndInsertForecastsFromTopForecasters(
 // Need to call this once per forecaster per topic inference solicitation round because protobuf does not nested repeated fields
 func (ms msgServer) InsertBulkWorkerPayload(ctx context.Context, msg *types.MsgInsertBulkWorkerPayload) (*types.MsgInsertBulkWorkerPayloadResponse, error) {
 	fmt.Printf("TTTTEEEESSSSTTTT: InsertBulkWorkerPayload\nSender: %s\nNonce: %v\nTopicId %d\nWorkerDataBundles %v\n", msg.Sender, msg.Nonce, msg.TopicId, msg.WorkerDataBundles)
-	err := ms.CheckInputLength(ctx, msg)
+	err := checkInputLength(ctx, ms, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -256,8 +258,9 @@ func (ms msgServer) InsertBulkWorkerPayload(ctx context.Context, msg *types.MsgI
 		return nil, err
 	}
 
-	acceptedInferers, err := ms.VerifyAndInsertInferencesFromTopInferers(
+	acceptedInferers, err := verifyAndInsertInferencesFromTopInferers(
 		ctx,
+		ms,
 		msg.TopicId,
 		*msg.Nonce,
 		msg.WorkerDataBundles,
@@ -267,8 +270,9 @@ func (ms msgServer) InsertBulkWorkerPayload(ctx context.Context, msg *types.MsgI
 		return nil, err
 	}
 
-	err = ms.VerifyAndInsertForecastsFromTopForecasters(
+	err = verifyAndInsertForecastsFromTopForecasters(
 		ctx,
+		ms,
 		msg.TopicId,
 		*msg.Nonce,
 		msg.WorkerDataBundles,

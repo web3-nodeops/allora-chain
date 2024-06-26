@@ -21,7 +21,7 @@ func (ms msgServer) InsertBulkReputerPayload(
 	msg *types.MsgInsertBulkReputerPayload,
 ) (*types.MsgInsertBulkReputerPayloadResponse, error) {
 	fmt.Printf("TTTEEESSSTTT: InsertBulkReputerPayload\nTopicId: %d\nReputerRequestNonce: %v\nReputerValueBundles: %v\n", msg.TopicId, msg.ReputerRequestNonce, msg.ReputerValueBundles)
-	err := ms.CheckInputLength(ctx, msg)
+	err := checkInputLength(ctx, ms, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (ms msgServer) InsertBulkReputerPayload(
 			// A check of their registration and other filters have already been applied when their inferences were inserted.
 			// We keep what we can, ignoring the reputer and their contribution (losses) entirely
 			// if they're left with no valid losses.
-			filteredBundle, err := ms.FilterUnacceptedWorkersFromReputerValueBundle(ctx, msg.TopicId, *msg.ReputerRequestNonce, bundle)
+			filteredBundle, err := filterUnacceptedWorkersFromReputerValueBundle(ctx, ms, msg.TopicId, *msg.ReputerRequestNonce, bundle)
 			if err != nil {
 				continue
 			}
@@ -219,8 +219,9 @@ func (ms msgServer) InsertBulkReputerPayload(
 // Filter out values of unaccepted workers.
 // It is assumed that the work of inferers and forecasters stored at the nonce is already filtered for acceptance.
 // This also removes duplicate values of the same worker.
-func (ms msgServer) FilterUnacceptedWorkersFromReputerValueBundle(
+func filterUnacceptedWorkersFromReputerValueBundle(
 	ctx context.Context,
+	ms msgServer,
 	topicId uint64,
 	reputerRequestNonce types.ReputerRequestNonce,
 	reputerValueBundle *types.ReputerValueBundle,
