@@ -13,17 +13,22 @@ import (
 func RegisterInvariants(ir sdk.InvariantRegistry, k *Keeper) {
 	ir.RegisterRoute(emissionsTypes.ModuleName, "allora-staking-total-balance", StakingInvariantTotalStakeEqualAlloraStakingBankBalance(*k))
 	ir.RegisterRoute(emissionsTypes.ModuleName, "allora-staking-total-stake-equal-topic-stake", StakingInvariantTotalStakeEqualSumTopicStakes(*k))
+	ir.RegisterRoute(emissionsTypes.ModuleName, "stake-removals-length-same", StakingInvariantLenStakeRemovalsSame(*k))
 }
 
 // AllInvariants is a convience function to run all invariants in the emissions module.
 func AllInvariants(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
-		res, stop := StakingInvariantTotalStakeEqualAlloraStakingBankBalance(k)(ctx)
-		if stop {
+		if res, stop := StakingInvariantTotalStakeEqualAlloraStakingBankBalance(k)(ctx); stop {
 			return res, stop
 		}
-		res, stop = StakingInvariantTotalStakeEqualSumTopicStakes(k)(ctx)
-		return res, stop
+		if res, stop := StakingInvariantTotalStakeEqualSumTopicStakes(k)(ctx); stop {
+			return res, stop
+		}
+		if res, stop := StakingInvariantLenStakeRemovalsSame(k)(ctx); stop {
+			return res, stop
+		}
+		return "", false
 	}
 }
 
@@ -80,6 +85,43 @@ func StakingInvariantTotalStakeEqualSumTopicStakes(k Keeper) sdk.Invariant {
 				totalStake.String(),
 				sumTopicStakes.String(),
 				numTopics,
+			),
+		), broken
+	}
+}
+
+// the number of values in the stakeRemovalsByBlock map
+// should always equal the number of values in the stakeRemovalsByActor map
+func StakingInvariantLenStakeRemovalsSame(k Keeper) sdk.Invariant {
+	return func(ctx sdk.Context) (string, bool) {
+		iterByBlock, err := k.stakeRemovalsByBlock.Iterate(ctx, nil)
+		if err != nil {
+			panic(fmt.Sprintf("failed to get stake removals iterator: %v", err))
+		}
+		valuesByBlock, err := iterByBlock.Values()
+		if err != nil {
+			panic(fmt.Sprintf("failed to get stake removals values: %v", err))
+		}
+		lenByBlock := len(valuesByBlock)
+		iterByActor, err := k.stakeRemovalsByActor.Iterate(ctx, nil)
+		if err != nil {
+			panic(fmt.Sprintf("failed to get stake removals iterator: %v", err))
+		}
+		valuesByActor, err := iterByActor.Keys()
+		if err != nil {
+			panic(fmt.Sprintf("failed to get stake removals values: %v", err))
+		}
+		lenByActor := len(valuesByActor)
+
+		broken := lenByBlock != lenByActor
+		return sdk.FormatInvariant(
+			emissionsTypes.ModuleName,
+			"emissions module length of stake removals same",
+			fmt.Sprintf("Length of stake removals: %d | Length of stake removals: %d\n%v\n%v",
+				lenByBlock,
+				lenByActor,
+				valuesByBlock,
+				valuesByActor,
 			),
 		), broken
 	}
