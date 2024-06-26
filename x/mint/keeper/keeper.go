@@ -133,7 +133,7 @@ func (k Keeper) PayValidatorsFromEcosystem(ctx context.Context, rewards sdk.Coin
 	if rewards.Empty() {
 		return nil
 	}
-	//fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromModuleToModule <<<<<<<<<<<<<<< %s %s %s\n", types.EcosystemModuleName, k.feeCollectorName, rewards.String())
+	fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromModuleToModule <<<<<<<<<<<<<<< %s %s %s\n", types.EcosystemModuleName, k.feeCollectorName, rewards.String())
 	return k.bankKeeper.SendCoinsFromModuleToModule(
 		ctx,
 		types.EcosystemModuleName,

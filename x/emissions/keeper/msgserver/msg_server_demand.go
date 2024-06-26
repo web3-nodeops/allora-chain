@@ -38,6 +38,7 @@ func (ms msgServer) FundTopic(ctx context.Context, msg *types.MsgFundTopic) (*ty
 	// bank module does this for us in module SendCoins / subUnlockedCoins so we don't need to check
 	// Send funds
 	coins := sdk.NewCoins(sdk.NewCoin(appParams.DefaultBondDenom, msg.Amount))
+	fmt.Printf(">>>>>>>>>>>>>>>>>> SendCoinsFromAccountToModule <<<<<<<<<<<<<<< %s %s %s\n", msg.Sender, minttypes.EcosystemModuleName, msg.Amount.String())
 	err = ms.k.SendCoinsFromAccountToModule(ctx, msg.Sender, minttypes.EcosystemModuleName, coins)
 	if err != nil {
 		return nil, err
