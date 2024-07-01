@@ -6,6 +6,7 @@ import (
 	"cosmossdk.io/collections"
 	cosmosMath "cosmossdk.io/math"
 	"github.com/allora-network/allora-chain/app/params"
+	alloraMath "github.com/allora-network/allora-chain/math"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
@@ -16,6 +17,7 @@ func RegisterInvariants(ir sdk.InvariantRegistry, k *Keeper) {
 	ir.RegisterRoute(emissionstypes.ModuleName, "allora-staking-total-topic-stake-equal-reputer-authority", StakingInvariantSumStakeFromStakeReputerAuthorityEqualTotalStakeAndTopicStake(*k))
 	ir.RegisterRoute(emissionstypes.ModuleName, "stake-removals-length-same", StakingInvariantLenStakeRemovalsSame(*k))
 	ir.RegisterRoute(emissionstypes.ModuleName, "stake-sum-delegated-stakes", StakingInvariantDelegatedStakes(*k))
+	ir.RegisterRoute(emissionstypes.ModuleName, "pending-reward-for-delegators-equal-reward-per-share-minus-reward-debt", StakingInvariantPendingRewardForDelegatorsEqualRewardPerShareMinusRewardDebt(*k))
 }
 
 // AllInvariants is a convience function to run all invariants in the emissions module.
@@ -31,6 +33,9 @@ func AllInvariants(k Keeper) sdk.Invariant {
 			return res, stop
 		}
 		if res, stop := StakingInvariantDelegatedStakes(k)(ctx); stop {
+			return res, stop
+		}
+		if res, stop := StakingInvariantPendingRewardForDelegatorsEqualRewardPerShareMinusRewardDebt(k)(ctx); stop {
 			return res, stop
 		}
 		return "", false
@@ -87,16 +92,62 @@ func StakingInvariantLenStakeRemovalsSame(k Keeper) sdk.Invariant {
 		lenByActor := len(valuesByActor)
 
 		broken := lenByBlock != lenByActor
-		return sdk.FormatInvariant(
-			emissionstypes.ModuleName,
-			"emissions module length of stake removals same",
-			fmt.Sprintf("Length of stake removals: %d | Length of stake removals: %d\n%v\n%v",
-				lenByBlock,
-				lenByActor,
-				valuesByBlock,
-				valuesByActor,
-			),
-		), broken
+		if broken {
+			return sdk.FormatInvariant(
+				emissionstypes.ModuleName,
+				"emissions module length of stake removals same",
+				fmt.Sprintf("Length of stake removals: %d | Length of stake removals: %d\n%v\n%v",
+					lenByBlock,
+					lenByActor,
+					valuesByBlock,
+					valuesByActor,
+				),
+			), broken
+		}
+		totalSumRemove := cosmosMath.ZeroInt()
+		topicSumsRemove := make(map[uint64]cosmosMath.Int)
+		for _, value := range valuesByBlock {
+			topicSumBefore, has := topicSumsRemove[value.TopicId]
+			if !has {
+				topicSumBefore = cosmosMath.ZeroInt()
+			}
+			topicSumsRemove[value.TopicId] = topicSumBefore.Add(value.Amount)
+			totalSumRemove = totalSumRemove.Add(value.Amount)
+		}
+		totalStake, err := k.totalStake.Get(ctx)
+		if err != nil {
+			panic(fmt.Sprintf("failed to get total stake: %v", err))
+		}
+		broken = !totalStake.GTE(totalSumRemove)
+		if broken {
+			return sdk.FormatInvariant(
+				emissionstypes.ModuleName,
+				"emissions module total stake greater than or equal to total stake removals",
+				fmt.Sprintf("TotalStake: %s | TotalStakeRemove: %s",
+					totalStake.String(),
+					totalSumRemove.String(),
+				),
+			), broken
+		}
+		for topicId, topicSumRemove := range topicSumsRemove {
+			topicStake, err := k.GetTopicStake(ctx, topicId)
+			if err != nil {
+				panic(fmt.Sprintf("failed to get topic stake: %v", err))
+			}
+			broken = !topicStake.GTE(topicSumRemove)
+			if broken {
+				return sdk.FormatInvariant(
+					emissionstypes.ModuleName,
+					"emissions module topic stake greater than or equal to topic stake removals",
+					fmt.Sprintf("TopicId: %d | TopicStake: %s | TopicStakeRemove: %s",
+						topicId,
+						topicStake.String(),
+						topicSumRemove.String(),
+					),
+				), broken
+			}
+		}
+		return "", false
 	}
 }
 
@@ -253,5 +304,96 @@ func StakingInvariantSumStakeFromStakeReputerAuthorityEqualTotalStakeAndTopicSta
 				numTopics,
 			),
 		), broken
+	}
+}
+
+func StakingInvariantPendingRewardForDelegatorsEqualRewardPerShareMinusRewardDebt(k Keeper) sdk.Invariant {
+	return func(ctx sdk.Context) (string, bool) {
+		// get the sum of all accumulated debts that happend to be staked upon a reputer
+		iter, err := k.delegatedStakes.Iterate(ctx, nil)
+		if err != nil {
+			panic("failed to get delegated stakes iterator")
+		}
+		type TopicAndReputer struct {
+			topicId uint64
+			reputer string
+		}
+		rewardDebtSums := make(map[TopicAndReputer]alloraMath.Dec)
+		reputerStakeSums := make(map[TopicAndReputer]alloraMath.Dec)
+		for ; iter.Valid(); iter.Next() {
+			keyValue, err := iter.KeyValue()
+			if err != nil {
+				panic("failed to get key value from delegatedStakes iterator")
+			}
+			topicAndReputer := TopicAndReputer{topicId: keyValue.Key.K1(), reputer: keyValue.Key.K3()}
+			rewardDebtSum, has := rewardDebtSums[topicAndReputer]
+			if !has {
+				rewardDebtSum = alloraMath.ZeroDec()
+			}
+			rewardDebtSumNew, err := rewardDebtSum.Add(keyValue.Value.RewardDebt)
+			if err != nil {
+				panic("failed to add reward debt sum")
+			}
+			rewardDebtSums[topicAndReputer] = rewardDebtSumNew
+			delegatedStakeSum, has := reputerStakeSums[topicAndReputer]
+			if !has {
+				delegatedStakeSum = alloraMath.ZeroDec()
+			}
+			delegatedStakeSumNew, err := delegatedStakeSum.Add(keyValue.Value.Amount)
+			if err != nil {
+				panic("failed to add stake sum")
+			}
+			reputerStakeSums[topicAndReputer] = delegatedStakeSumNew
+		}
+		// now for each reputer and topic, get the accumulated reward per share
+		// then multiply it by the stake sum of the reputer
+		iter2, err := k.delegateRewardPerShare.Iterate(ctx, nil)
+		if err != nil {
+			panic("failed to get delegate reward per share iterator")
+		}
+		accumulatedRewardsBeyondRewardDebt := alloraMath.ZeroDec()
+		for ; iter2.Valid(); iter2.Next() {
+			keyValue, err := iter2.KeyValue()
+			if err != nil {
+				panic("failed to get key value from delegateRewardPerShare iterator")
+			}
+			topicAndReputer := TopicAndReputer{topicId: keyValue.Key.K1(), reputer: keyValue.Key.K2()}
+			stakeSum := reputerStakeSums[topicAndReputer]
+			rewardDebt := rewardDebtSums[topicAndReputer]
+			stakeTimesRewardPerShare, err := stakeSum.Mul(keyValue.Value)
+			if err != nil {
+				panic("failed to multiply stake sum by reward per share")
+			}
+			stakeTimeRewardPerShareMinusRewardDebt, err := stakeTimesRewardPerShare.Sub(rewardDebt)
+			if err != nil {
+				panic("failed to subtract reward debt from stake times reward per share")
+			}
+			if stakeTimeRewardPerShareMinusRewardDebt.IsNegative() {
+				panic(fmt.Sprintf("reward per share minus reward debt negative: stakeSum: %s, rewardPerShare: %s, rewardDebt: %s",
+					stakeSum.String(), keyValue.Value.String(), rewardDebt.String(),
+				))
+			}
+			accumulatedRewardsBeyondRewardDebt, err = accumulatedRewardsBeyondRewardDebt.Add(stakeTimeRewardPerShareMinusRewardDebt)
+			if err != nil {
+				panic("failed to add stake times reward per share minus reward debt to accumulated rewards")
+			}
+		}
+
+		// now check the total pending rewards bank balance is equal to the accumulated rewards beyond reward debt
+		alloraPendingAddr := k.authKeeper.GetModuleAccount(ctx, emissionstypes.AlloraPendingRewardForDelegatorAccountName).GetAddress()
+		bal := k.GetBankBalance(ctx, alloraPendingAddr, params.DefaultBondDenom).Amount
+		rewards := accumulatedRewardsBeyondRewardDebt.SdkIntTrim()
+		broken := !bal.Equal(rewards)
+		if broken {
+			return sdk.FormatInvariant(
+				emissionstypes.ModuleName,
+				"emissions module pending reward for delegators equal reward per share minus reward debt",
+				fmt.Sprintf("Pending Reward For Delegators: %s | Accumulated Rewards Beyond Reward Debt: %s",
+					bal.String(),
+					rewards.String(),
+				),
+			), broken
+		}
+		return "", false
 	}
 }
