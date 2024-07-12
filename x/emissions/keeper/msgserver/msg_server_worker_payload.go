@@ -325,12 +325,8 @@ func (ms msgServer) InsertBulkWorkerPayload(ctx context.Context, msg *types.MsgI
 		return nil, err
 	}
 
-	workerNonce := &types.Nonce{
-		BlockHeight: msg.Nonce.BlockHeight - topic.EpochLength,
-	}
-	sdkCtx.Logger().Debug(fmt.Sprintf("InsertBulkWorkerPayload workerNonce %d", workerNonce.BlockHeight))
-
-	err = ms.k.AddReputerNonce(ctx, topic.Id, msg.Nonce, workerNonce)
+	sdkCtx.Logger().Debug(fmt.Sprintf("Fulfilled Worker Nonce, adding Reputer Nonce %v", msg.Nonce))
+	err = ms.k.AddReputerNonce(ctx, topic.Id, msg.Nonce)
 	if err != nil {
 		return nil, err
 	}
