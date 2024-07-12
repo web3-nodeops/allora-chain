@@ -8,16 +8,24 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
+<<<<<<< HEAD
 func (s *KeeperTestSuite) TestGetInfererScoreEma() {
+=======
+func (s *KeeperTestSuite) TestGetLatestInfererScore() {
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	ctx := s.ctx
 	keeper := s.emissionsKeeper
 	topicId := uint64(1)
 	worker := "worker1"
+<<<<<<< HEAD
 	alpha := alloraMath.OneDec()
+=======
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	oldScore := types.Score{TopicId: topicId, BlockHeight: 1, Address: worker, Score: alloraMath.NewDecFromInt64(90)}
 	newScore := types.Score{TopicId: topicId, BlockHeight: 2, Address: worker, Score: alloraMath.NewDecFromInt64(95)}
 
 	// Set an initial score for inferer and attempt to update with an older score
+<<<<<<< HEAD
 	_ = keeper.UpdateInfererScoreEma(ctx, topicId, alpha, worker, newScore)
 	err := keeper.UpdateInfererScoreEma(ctx, topicId, alpha, worker, oldScore)
 	s.Require().NoError(err, "Setting an older inferer score should not fail but should not update")
@@ -27,18 +35,34 @@ func (s *KeeperTestSuite) TestGetInfererScoreEma() {
 		Worker:  worker,
 	}
 	response, err := s.queryServer.GetInfererScoreEma(ctx, req)
+=======
+	_ = keeper.SetLatestInfererScore(ctx, topicId, worker, newScore)
+	err := keeper.SetLatestInfererScore(ctx, topicId, worker, oldScore)
+	s.Require().NoError(err, "Setting an older inferer score should not fail but should not update")
+
+	req := &types.QueryLatestInfererScoreRequest{
+		TopicId: topicId,
+		Worker:  worker,
+	}
+	response, err := s.queryServer.GetLatestInfererScore(ctx, req)
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	s.Require().NoError(err)
 
 	updatedScore := response.Score
 	s.Require().NotEqual(oldScore.Score, updatedScore.Score, "Older score should not replace newer score")
 }
 
+<<<<<<< HEAD
 func (s *KeeperTestSuite) TestGetForecasterScoreEma() {
+=======
+func (s *KeeperTestSuite) TestGetLatestForecasterScore() {
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	ctx := s.ctx
 	keeper := s.emissionsKeeper
 	topicId := uint64(1)
 	worker := "worker1"
 	forecaster := "forecaster1"
+<<<<<<< HEAD
 	alpha := alloraMath.OneDec()
 	newScore := types.Score{TopicId: topicId, BlockHeight: 2, Address: worker, Score: alloraMath.NewDecFromInt64(95)}
 
@@ -50,18 +74,35 @@ func (s *KeeperTestSuite) TestGetForecasterScoreEma() {
 		Forecaster: forecaster,
 	}
 	response, err := s.queryServer.GetForecasterScoreEma(ctx, req)
+=======
+	newScore := types.Score{TopicId: topicId, BlockHeight: 2, Address: worker, Score: alloraMath.NewDecFromInt64(95)}
+
+	// Set a new score for forecaster
+	_ = keeper.SetLatestForecasterScore(ctx, topicId, forecaster, newScore)
+
+	req := &types.QueryLatestForecasterScoreRequest{
+		TopicId:    topicId,
+		Forecaster: forecaster,
+	}
+	response, err := s.queryServer.GetLatestForecasterScore(ctx, req)
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	s.Require().NoError(err)
 
 	forecasterScore := response.Score
 	s.Require().Equal(newScore.Score, forecasterScore.Score, "Newer forecaster score should be set")
 }
 
+<<<<<<< HEAD
 func (s *KeeperTestSuite) TestGetReputerScoreEma() {
+=======
+func (s *KeeperTestSuite) TestGetLatestReputerScore() {
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	ctx := s.ctx
 	keeper := s.emissionsKeeper
 	topicId := uint64(1)
 	worker := "worker1"
 	reputer := "reputer1"
+<<<<<<< HEAD
 	alpha := alloraMath.OneDec()
 	newScore := types.Score{TopicId: topicId, BlockHeight: 2, Address: worker, Score: alloraMath.NewDecFromInt64(95)}
 
@@ -73,6 +114,18 @@ func (s *KeeperTestSuite) TestGetReputerScoreEma() {
 		Reputer: reputer,
 	}
 	response, err := s.queryServer.GetReputerScoreEma(ctx, req)
+=======
+	newScore := types.Score{TopicId: topicId, BlockHeight: 2, Address: worker, Score: alloraMath.NewDecFromInt64(95)}
+
+	// Set a new score for reputer
+	_ = keeper.SetLatestReputerScore(ctx, topicId, reputer, newScore)
+
+	req := &types.QueryLatestReputerScoreRequest{
+		TopicId: topicId,
+		Reputer: reputer,
+	}
+	response, err := s.queryServer.GetLatestReputerScore(ctx, req)
+>>>>>>> c913caa87daa23cc421e3eacde31af7f4ff51b7e
 	s.Require().NoError(err)
 
 	reputerScore := response.Score
