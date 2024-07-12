@@ -5,6 +5,7 @@ import (
 
 	"cosmossdk.io/errors"
 	"github.com/allora-network/allora-chain/app/params"
+	alloraMath "github.com/allora-network/allora-chain/math"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 	mintTypes "github.com/allora-network/allora-chain/x/mint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -72,6 +73,7 @@ func (ms msgServer) CreateNewTopic(ctx context.Context, msg *types.MsgCreateNewT
 		ActiveInfererQuantile:    msg.ActiveInfererQuantile,
 		ActiveForecasterQuantile: msg.ActiveForecasterQuantile,
 		ActiveReputerQuantile:    msg.ActiveReputerQuantile,
+		InitialRegret:            alloraMath.ZeroDec(),
 	}
 	_, err = ms.k.IncrementTopicId(ctx)
 	if err != nil {

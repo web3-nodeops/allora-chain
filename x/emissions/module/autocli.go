@@ -286,6 +286,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 						{ProtoField: "active_inferer_quantile"},
 						{ProtoField: "active_forecaster_quantile"},
 						{ProtoField: "active_reputer_quantile"},
+						{ProtoField: "initial_regret"},
 					},
 				},
 				{
