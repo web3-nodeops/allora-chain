@@ -77,4 +77,6 @@ message Params {
     (gogoproto.nullable) = false,
     (amino.dont_omitempty) = true
   ];
+  // expected blocks per year
+  uint64 blocks_per_year = 11;
 }

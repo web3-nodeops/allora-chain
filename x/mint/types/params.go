@@ -54,6 +54,7 @@ func DefaultParams() Params {
 		InvestorsPercentOfTotalSupply:          math.LegacyMustNewDecFromStr("0.3105"), // 31.05%
 		TeamPercentOfTotalSupply:               math.LegacyMustNewDecFromStr("0.175"),  // 17.5%
 		MaximumMonthlyPercentageYield:          math.LegacyMustNewDecFromStr("0.0095"), // .95% per month
+		BlocksPerYear:                          15519200,
 	}
 }
 
