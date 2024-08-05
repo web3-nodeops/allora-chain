@@ -275,31 +275,31 @@ func LinearInterpolation(x, xp, fp []Dec) ([]Dec, error) {
 			result[i] = fp[len(fp)-1]
 		} else {
 			j := sort.Search(len(xp)-1, func(j int) bool { return xi.Lt(xp[j+1]) })
-			t1, err := xi.Sub(xp[j])
+			denominator, err := xp[j+1].Sub(xp[j])
 			if err != nil {
 				return nil, err
 			}
-			t2, err := xp[j+1].Sub(xp[j])
+			numerator, err := xi.Sub(xp[j])
 			if err != nil {
 				return nil, err
 			}
-			t, err := t1.Quo(t2)
+			t, err := numerator.Quo(denominator)
 			if err != nil {
 				return nil, err
 			}
-			oneminust, err := OneDec().Sub(t)
+			oneMinusT, err := OneDec().Sub(t)
 			if err != nil {
 				return nil, err
 			}
-			fpjmuloneminust, err := fp[j].Mul(oneminust)
+			fpjMulOneMinusT, err := fp[j].Mul(oneMinusT)
 			if err != nil {
 				return nil, err
 			}
-			fpjplus1mult, err := fp[j+1].Mul(t)
+			fpjPlusOneMulT, err := fp[j+1].Mul(t)
 			if err != nil {
 				return nil, err
 			}
-			result[i], err = fpjmuloneminust.Add(fpjplus1mult)
+			result[i], err = fpjMulOneMinusT.Add(fpjPlusOneMulT)
 			if err != nil {
 				return nil, err
 			}
