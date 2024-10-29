@@ -66,7 +66,11 @@ func TestFuzzTestSuite(t *testing.T) {
 	mode := lookupEnvSimulationMode()
 
 	t.Log("Max Actors: ", numActors)
-	t.Log("Max Iterations: ", maxIterations)
+	if maxIterations == 0 {
+		t.Log("Max Iterations:0, will continue forever until interrupted")
+	} else {
+		t.Log("Max Iterations: ", maxIterations)
+	}
 	t.Log("Epoch Length: ", epochLength)
 	t.Log("Simulation mode: ", mode)
 
@@ -80,6 +84,7 @@ func TestFuzzTestSuite(t *testing.T) {
 		numActors,
 		epochLength,
 		mode,
+		seed,
 	)
 
 	timestr = fmt.Sprintf(">>> Complete %s <<<", time.Now().Format(time.RFC850))
@@ -93,8 +98,9 @@ func simulate(
 	numActors int,
 	epochLength int,
 	mode SimulationMode,
+	seed int,
 ) {
-	faucet, simulationData := simulateSetUp(m, numActors, epochLength, mode)
+	faucet, simulationData := simulateSetUp(m, numActors, epochLength, mode, seed)
 	if mode == Manual {
 		simulateManual(m, faucet, simulationData)
 	} else {
@@ -159,6 +165,7 @@ func simulateAutomatic(
 	// for every iteration
 	// pick a state transition, then run it. every 5 print a summary
 	// if the test mode is alternating, flip whether to behave nicely or not
+	infiniteMode := maxIterations == 0
 	maxIterations = maxIterations + iterationCountInitialState
 	var followTransition *StateTransition = nil
 	stateTransition := StateTransition{
@@ -171,7 +178,7 @@ func simulateAutomatic(
 	actor1, actor2 := UnusedActor, UnusedActor
 	var amount *cosmossdk_io_math.Int = nil
 	var topicId uint64 = 0
-	for iteration := iterationCountInitialState; maxIterations == 0 || iteration < maxIterations; iteration++ {
+	for iteration := iterationCountInitialState; infiniteMode || iteration < maxIterations; iteration++ {
 		if data.mode == Alternate {
 			data.randomlyFlipFailOnErr(m, iteration)
 		}
@@ -214,6 +221,7 @@ func pickTransition(
 			m,
 			stateTransition,
 			data,
+			iteration,
 		)
 		if data.failOnErr && !couldPickActors {
 			iterLog(m.T, iteration, "Could not pick actors for transition: ", stateTransition.name)

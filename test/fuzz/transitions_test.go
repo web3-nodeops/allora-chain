@@ -171,7 +171,7 @@ func pickFollowOnTransitionWithWeight(m *testcommon.TestConfig, currTransition S
 	return nil
 }
 
-// state machine dependencies for valid transitions
+// State machine dependencies for valid transitions
 //
 // fundTopic: CreateTopic
 // RegisterWorkerForTopic: CreateTopic
@@ -187,6 +187,9 @@ func pickFollowOnTransitionWithWeight(m *testcommon.TestConfig, currTransition S
 // collectDelegatorRewards: delegateStake, fundTopic, InsertWorkerPayload, InsertReputerPayload
 // InsertWorkerPayload: RegisterWorkerForTopic, FundTopic
 // InsertReputerPayload: RegisterReputerForTopic, InsertWorkerPayload
+//
+// Note: this function is not exhaustive, it only checks for the most obvious/low hanging fruit conditions
+// pickActorAndTopicIdForStateTransition will do further checks
 func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transition StateTransition) bool {
 	switch transition.name {
 	case "unregisterWorker":
@@ -204,13 +207,9 @@ func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transiti
 	case "collectDelegatorRewards":
 		return anyDelegatorsStaked(data) && anyReputersRegistered(data)
 	case "cancelStakeRemoval":
-		// we only do this as follow transitions to unstakeAsReputer
-		// so this is unused
-		return true
+		return anyReputersStaked(data)
 	case "cancelDelegateStakeRemoval":
-		// we only do this as follow transitions to undelegateStake
-		// so this is unused
-		return true
+		return anyDelegatorsStaked(data)
 	case "doInferenceAndReputation":
 		ctx := context.Background()
 		blockHeightNow, err := m.Client.BlockHeight(ctx)
@@ -298,6 +297,7 @@ func pickActorAndTopicIdForStateTransition(
 	m *testcommon.TestConfig,
 	transition StateTransition,
 	data *SimulationData,
+	iteration int,
 ) (success bool, actor1 Actor, actor2 Actor, amount *cosmossdk_io_math.Int, topicId uint64) {
 	switch transition.name {
 	case "unregisterWorker":
@@ -334,15 +334,20 @@ func pickActorAndTopicIdForStateTransition(
 		if err != nil {
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
-		amount := data.pickPercentOfStakeByReputer(m.Client.Rand, topicId, reputer)
+		amount := pickPercentOfStakeByReputer(m, topicId, reputer, data, iteration)
 		return true, reputer, UnusedActor, &amount, topicId
 	case "undelegateStake":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
 		if err != nil {
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
-		amount := data.pickPercentOfStakeByDelegator(m.Client.Rand, topicId, delegator, reputer)
+		amount := pickPercentOfStakeByDelegator(m, topicId, delegator, reputer, data, iteration)
 		return true, delegator, reputer, &amount, topicId
+	/*case "cancelStakeRemoval":
+		return true
+	case "cancelDelegateStakeRemoval":
+		return true
+	*/
 	case "collectDelegatorRewards":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
 		if err != nil {
