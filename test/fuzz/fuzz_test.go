@@ -179,19 +179,19 @@ func simulateAutomatic(
 	var amount *cosmossdk_io_math.Int = nil
 	var topicId uint64 = 0
 	for iteration := iterationCountInitialState; infiniteMode || iteration < maxIterations; iteration++ {
-		if data.mode == Alternate {
-			data.randomlyFlipFailOnErr(m, iteration)
-		}
-		// This is not a follow-on transition, pick a new one
-		if followTransition == nil {
+		// This is a follow-on transition, do it with the same actors values and topic id as the previous iteration
+		if followTransition != nil {
+			followTransition.f(m, actor1, actor2, amount, topicId, data, iteration)
+			followTransition = nil
+		} else { // This is not a follow-on transition, pick new actors and topic id
+			if data.mode == Alternate {
+				data.randomlyFlipFailOnErr(m, iteration)
+			}
 			stateTransition, actor1, actor2, amount, topicId = pickTransition(m, data, iteration)
 			stateTransition.f(m, actor1, actor2, amount, topicId, data, iteration)
 
 			// if this state transition has a follow-on transition, decide whether to do it or not
 			followTransition = pickFollowOnTransitionWithWeight(m, stateTransition)
-		} else { // This is a follow-on transition, do it with the same actors values and topic id
-			followTransition.f(m, actor1, actor2, amount, topicId, data, iteration)
-			followTransition = nil
 		}
 		if iteration%5 == 0 {
 			m.T.Log("State Transitions Summary:", data.counts)

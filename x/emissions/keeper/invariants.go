@@ -320,14 +320,19 @@ func StakingInvariantPendingRewardForDelegatorsGreaterThanRewardPerShareMinusRew
 			topicId uint64
 			reputer string
 		}
+
+		// first get the balance of the pending reward for delegators account
+		// this is the total amount of rewards that we hold on behalf of delegators
+		alloraPendingAddr := k.authKeeper.GetModuleAccount(ctx, emissionstypes.AlloraPendingRewardForDelegatorAccountName).GetAddress()
+		alloraPendingBankBal := k.GetBankBalance(ctx, alloraPendingAddr, params.DefaultBondDenom).Amount
+
+		// for every delegator stake position
 		delegatedStakesIter, err := k.delegatedStakes.Iterate(ctx, nil)
 		if err != nil {
 			panic("failed to get delegated stakes iterator")
 		}
 		defer delegatedStakesIter.Close()
-		sumRewardDebtOnReputer := make(map[TopicAndReputer]alloraMath.Dec)
-		sumStakeDelegatedOnReputer := make(map[TopicAndReputer]alloraMath.Dec)
-		// get the sum of all accumulated debts that happened to be staked upon a reputer
+		// get the stake position information
 		for ; delegatedStakesIter.Valid(); delegatedStakesIter.Next() {
 			keyValue, err := delegatedStakesIter.KeyValue()
 			if err != nil {
@@ -336,90 +341,40 @@ func StakingInvariantPendingRewardForDelegatorsGreaterThanRewardPerShareMinusRew
 			topicId := keyValue.Key.K1()
 			reputer := keyValue.Key.K3()
 			delegatorInfo := keyValue.Value
-			topicAndReputer := TopicAndReputer{topicId: topicId, reputer: reputer}
-
-			previousRewardDebtSum, has := sumRewardDebtOnReputer[topicAndReputer]
-			if !has {
-				previousRewardDebtSum = alloraMath.ZeroDec()
-			}
-			rewardDebtSumNew, err := previousRewardDebtSum.Add(delegatorInfo.RewardDebt)
+			// Get share for this topicId and reputer
+			share, err := k.GetDelegateRewardPerShare(ctx, topicId, reputer)
 			if err != nil {
-				panic("failed to add reward debt sum")
+				panic("failed to get delegate reward per share")
 			}
-			sumRewardDebtOnReputer[topicAndReputer] = rewardDebtSumNew
-
-			previousDelegatedStakeSum, has := sumStakeDelegatedOnReputer[topicAndReputer]
-			if !has {
-				previousDelegatedStakeSum = alloraMath.ZeroDec()
-			}
-			delegatedStakeSumNew, err := previousDelegatedStakeSum.Add(delegatorInfo.Amount)
+			pendingReward, err := delegatorInfo.Amount.Mul(share)
 			if err != nil {
-				panic("failed to add stake sum")
+				panic("failed to multiply stake by reward per share")
 			}
-			sumStakeDelegatedOnReputer[topicAndReputer] = delegatedStakeSumNew
+			pendingReward, err = pendingReward.Sub(delegatorInfo.RewardDebt)
+			if err != nil {
+				panic("failed to subtract reward debt from pending reward")
+			}
+			if pendingReward.Gt(alloraMath.NewDecFromInt64(0)) {
+				pendingRewardInt, err := pendingReward.SdkIntTrim()
+				if err != nil {
+					panic(err.Error() + " error trimming pending reward")
+				}
+
+				alloraPendingBankBal = alloraPendingBankBal.Sub(pendingRewardInt)
+			}
 		}
 		delegatedStakesIter.Close()
-		// now for each reputer and topic, get the accumulated reward per share
-		// then multiply it by the stake sum of the reputer
-		delegateRewardPerShareIter, err := k.delegateRewardPerShare.Iterate(ctx, nil)
-		if err != nil {
-			panic("failed to get delegate reward per share iterator")
-		}
-		defer delegateRewardPerShareIter.Close()
-		accumulatedRewardsBeyondRewardDebt := alloraMath.ZeroDec()
-		for ; delegateRewardPerShareIter.Valid(); delegateRewardPerShareIter.Next() {
-			keyValue, err := delegateRewardPerShareIter.KeyValue()
-			if err != nil {
-				panic("failed to get key value from delegateRewardPerShare iterator")
-			}
-			topicId := keyValue.Key.K1()
-			reputer := keyValue.Key.K2()
-			rewardPerShare := keyValue.Value
-			topicAndReputer := TopicAndReputer{topicId: topicId, reputer: reputer}
-			stake := sumStakeDelegatedOnReputer[topicAndReputer]
-			rewardDebt := sumRewardDebtOnReputer[topicAndReputer]
 
-			// this is all of the rewards ever paid out to delegations on this reputer
-			stakeTimesRewardPerShare, err := stake.Mul(rewardPerShare)
-			if err != nil {
-				panic("failed to multiply stake sum by reward per share")
-			}
-			// this is the amount of rewards owed to delegators of this reputer
-			// that have not yet been paid out
-			stakeTimesRewardPerShareMinusRewardDebt, err := stakeTimesRewardPerShare.Sub(rewardDebt)
-			if err != nil {
-				panic("failed to subtract reward debt from stake times reward per share")
-			}
-			if stakeTimesRewardPerShareMinusRewardDebt.IsNegative() {
-				panic(fmt.Sprintf("reward per share minus reward debt negative: stakeSum: %s, rewardPerShare: %s, rewardDebt: %s",
-					stake.String(), keyValue.Value.String(), rewardDebt.String(),
-				))
-			}
-			// this is the amount of rewards yet unpaid owed to delegators across all topics
-			accumulatedRewardsBeyondRewardDebt, err = accumulatedRewardsBeyondRewardDebt.Add(stakeTimesRewardPerShareMinusRewardDebt)
-			if err != nil {
-				panic("failed to add stake times reward per share minus reward debt to accumulated rewards")
-			}
-		}
-		delegateRewardPerShareIter.Close()
-
-		// now check the total pending rewards bank balance is equal to the accumulated rewards beyond reward debt
-		alloraPendingAddr := k.authKeeper.GetModuleAccount(ctx, emissionstypes.AlloraPendingRewardForDelegatorAccountName).GetAddress()
-		bal := k.GetBankBalance(ctx, alloraPendingAddr, params.DefaultBondDenom).Amount
-		balDec, err := alloraMath.NewDecFromSdkInt(bal)
-		if err != nil {
-			panic("failed to convert balance to decimal")
-		}
-
+		// we have been subtracting the pending rewards for each individual delegator one by one
+		// in the for loop above. If this value is now negative, the invariant is broken.
 		// we should never think we owe people more than the balance we have earmarked to pay them
-		broken := balDec.Lt(accumulatedRewardsBeyondRewardDebt)
+		broken := alloraPendingBankBal.IsNegative()
 		if broken {
 			return sdk.FormatInvariant(
 				emissionstypes.ModuleName,
 				"rewards debt not greater than pending rewards balance",
-				fmt.Sprintf("Pending Rewards Module Account Balance: %s | Accumulated Rewards Beyond Reward Debt as Dec: %s",
-					bal.String(),
-					accumulatedRewardsBeyondRewardDebt.String(),
+				fmt.Sprintf("allora pending Bank Balance after subtracting pending rewards for all delegators: %s",
+					alloraPendingBankBal.String(),
 				),
 			), broken
 		}

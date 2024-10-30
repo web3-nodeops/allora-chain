@@ -28,8 +28,7 @@ func registerWorker(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(m.T, iteration, "registering ", actor, "as worker in topic id", topicId)
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &emissionstypes.RegisterRequest{
@@ -39,15 +38,17 @@ func registerWorker(
 		TopicId:   topicId,
 	})
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId)
-		return
+	if err != nil {
+		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId, "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId, "tx wait error", err)
+		return false
+	}
 
 	registerWorkerResponse := &emissionstypes.RegisterResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(registerWorkerResponse)
@@ -55,15 +56,15 @@ func registerWorker(
 	if data.failOnErr {
 		require.True(m.T, registerWorkerResponse.Success)
 	}
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.addWorkerRegistration(topicId, actor)
-		data.counts.incrementRegisterWorkerCount()
-		iterSuccessLog(m.T, iteration, "registered ", actor, "as worker in topic id ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId)
+	if err != nil {
+		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId, "tx decode error", err)
+		return false
 	}
+
+	data.addWorkerRegistration(topicId, actor)
+	data.counts.incrementRegisterWorkerCount()
+	iterSuccessLog(m.T, iteration, "registered ", actor, "as worker in topic id ", topicId)
+	return true
 }
 
 // unregister actor from being a worker in topic topicId
@@ -75,8 +76,7 @@ func unregisterWorker(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(m.T, iteration, "unregistering ", actor, "as worker in topic id", topicId)
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &emissionstypes.RemoveRegistrationRequest{
@@ -85,15 +85,23 @@ func unregisterWorker(
 		IsReputer: false,
 	})
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "failed to unregister ", actor, "as worker in topic id ", topicId)
-		return
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as worker in topic id ", topicId, "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as worker in topic id ", topicId, "tx wait error", err)
+		return false
+	}
 
 	removeRegistrationResponse := &emissionstypes.RemoveRegistrationResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(removeRegistrationResponse)
@@ -101,15 +109,18 @@ func unregisterWorker(
 	if data.failOnErr {
 		require.True(m.T, removeRegistrationResponse.Success)
 	}
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.removeWorkerRegistration(topicId, actor)
-		data.counts.incrementUnregisterWorkerCount()
-		iterSuccessLog(m.T, iteration, "unregistered ", actor, "as worker in topic id ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, "failed to unregister ", actor, "as worker in topic id ", topicId)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as worker in topic id ", topicId, "tx decode error", err)
+		return false
 	}
+
+	data.removeWorkerRegistration(topicId, actor)
+	data.counts.incrementUnregisterWorkerCount()
+	iterSuccessLog(m.T, iteration, "unregistered ", actor, "as worker in topic id ", topicId)
+	return true
 }
 
 // register actor as a new reputer in topicId
@@ -121,8 +132,7 @@ func registerReputer(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(m.T, iteration, "registering ", actor, "as reputer in topic id", topicId)
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &emissionstypes.RegisterRequest{
@@ -132,15 +142,23 @@ func registerReputer(
 		TopicId:   topicId,
 	})
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "failed to register ", actor, "as reputer in topic id ", topicId)
-		return
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to register ", actor, "as reputer in topic id ", topicId, "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to register ", actor, "as reputer in topic id ", topicId, "tx wait error", err)
+		return false
+	}
 
 	registerWorkerResponse := &emissionstypes.RegisterResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(registerWorkerResponse)
@@ -148,15 +166,18 @@ func registerReputer(
 	if data.failOnErr {
 		require.True(m.T, registerWorkerResponse.Success)
 	}
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.addReputerRegistration(topicId, actor)
-		data.counts.incrementRegisterReputerCount()
-		iterSuccessLog(m.T, iteration, "registered ", actor, "as reputer in topic id ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, "failed to register ", actor, "as reputer in topic id ", topicId)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to register ", actor, "as reputer in topic id ", topicId, "tx decode error", err)
+		return false
 	}
+
+	data.addReputerRegistration(topicId, actor)
+	data.counts.incrementRegisterReputerCount()
+	iterSuccessLog(m.T, iteration, "registered ", actor, "as reputer in topic id ", topicId)
+	return true
 }
 
 // unregister actor as a reputer in topicId
@@ -168,8 +189,7 @@ func unregisterReputer(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(m.T, iteration, "unregistering ", actor, "as reputer in topic id", topicId)
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &emissionstypes.RemoveRegistrationRequest{
@@ -178,15 +198,23 @@ func unregisterReputer(
 		IsReputer: true,
 	})
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "failed to unregister ", actor, "as reputer in topic id ", topicId)
-		return
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as reputer in topic id ", topicId, "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
 	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as reputer in topic id ", topicId, "tx wait error", err)
+		return false
+	}
 
 	removeRegistrationResponseMsg := &emissionstypes.RemoveRegistrationResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(removeRegistrationResponseMsg)
@@ -194,13 +222,16 @@ func unregisterReputer(
 	if data.failOnErr {
 		require.True(m.T, removeRegistrationResponseMsg.Success)
 	}
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.removeReputerRegistration(topicId, actor)
-		data.counts.incrementUnregisterReputerCount()
-		iterSuccessLog(m.T, iteration, "unregistered ", actor, "as reputer in topic id ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, "failed to unregister ", actor, "as reputer in topic id ", topicId)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to unregister ", actor, "as reputer in topic id ", topicId, "tx decode error", err)
+		return false
 	}
+
+	data.removeReputerRegistration(topicId, actor)
+	data.counts.incrementUnregisterReputerCount()
+	iterSuccessLog(m.T, iteration, "unregistered ", actor, "as reputer in topic id ", topicId)
+	return true
 }

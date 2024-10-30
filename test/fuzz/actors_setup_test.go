@@ -272,12 +272,14 @@ func startRegisterReputers(
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
 			// register reputer on the topic
-			registerReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := registerReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 			// stake reputer on the topic
 			bal, err := pickRandomBalanceLessThanHalf(m, reputer)
 			requireNoError(m.T, true, err)
-			stakeAsReputer(m, reputer, UnusedActor, &bal, topicId, data, iterationCount)
+			success = stakeAsReputer(m, reputer, UnusedActor, &bal, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -295,7 +297,8 @@ func startRegisterWorkers(
 	iterationCount := iterationCountStart
 	for _, worker := range startWorkers {
 		for _, topicId := range listTopics {
-			registerWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			success := registerWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -316,7 +319,8 @@ func startDelegateDelegators(
 		for _, topicId := range listTopics {
 			bal, err := pickRandomBalanceLessThanHalf(m, delegator)
 			requireNoError(m.T, true, err)
-			delegateStake(m, delegator, startReputers[i], &bal, topicId, data, iterationCount)
+			success := delegateStake(m, delegator, startReputers[i], &bal, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -335,7 +339,8 @@ func startFundTopics(
 	for _, topicId := range listTopics {
 		fundAmount, err := pickRandomBalanceLessThanHalf(m, faucet)
 		requireNoError(m.T, true, err)
-		fundTopic(m, faucet, UnusedActor, &fundAmount, topicId, data, iterationCount)
+		success := fundTopic(m, faucet, UnusedActor, &fundAmount, topicId, data, iterationCount)
+		require.True(m.T, success)
 		iterationCount++
 	}
 	return iterationCount
@@ -350,7 +355,8 @@ func startDoInferenceAndReputation(
 ) (iterationCountAfter int) {
 	iterationCount := iterationCountStart
 	for _, topicId := range listTopics {
-		doInferenceAndReputation(m, UnusedActor, UnusedActor, nil, topicId, data, iterationCount)
+		success := doInferenceAndReputation(m, UnusedActor, UnusedActor, nil, topicId, data, iterationCount)
+		require.True(m.T, success)
 		iterationCount++
 	}
 	return iterationCount
@@ -368,7 +374,8 @@ func startCollectDelegatorRewards(
 	iterationCount := iterationCountStart
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
-			collectDelegatorRewards(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			success := collectDelegatorRewards(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -386,7 +393,8 @@ func startUnregisterWorkers(
 	iterationCount := iterationCountStart
 	for _, worker := range startWorkers {
 		for _, topicId := range listTopics {
-			unregisterWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			success := unregisterWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -404,7 +412,8 @@ func startUnregisterReputers(
 	iterationCount := iterationCountStart
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
-			unregisterReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := unregisterReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -424,7 +433,8 @@ func startUndelegateStake(
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
 			amount := pickPercentOfStakeByDelegator(m, topicId, delegator, startReputers[i], data, iterationCount)
-			undelegateStake(m, delegator, startReputers[i], &amount, topicId, data, iterationCount)
+			success := undelegateStake(m, delegator, startReputers[i], &amount, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -443,7 +453,8 @@ func startUnstakeAsReputer(
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
 			amount := pickPercentOfStakeByReputer(m, topicId, reputer, data, iterationCount)
-			unstakeAsReputer(m, reputer, UnusedActor, &amount, topicId, data, iterationCount)
+			success := unstakeAsReputer(m, reputer, UnusedActor, &amount, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -461,7 +472,8 @@ func startCancelStakeRemoval(
 	iterationCount := iterationCountStart
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
-			cancelStakeRemoval(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := cancelStakeRemoval(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -481,7 +493,8 @@ func startCancelDelegateStakeRemoval(
 	iterationCount := iterationCountStart
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
-			cancelDelegateStakeRemoval(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			success := cancelDelegateStakeRemoval(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -504,9 +517,11 @@ func simulateAutomaticInitialState(
 	// additive actions
 
 	// create two topics
-	createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	success := createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	require.True(m.T, success)
 	iterationCount++
-	createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	success = createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	require.True(m.T, success)
 	iterationCount++
 	// pick 4 reputers, 4 workers, and 2 delegators
 	startReputers, startWorkers, startDelegators := pickAutoSetupActors(m, data)

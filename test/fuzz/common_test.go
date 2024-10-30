@@ -101,8 +101,3 @@ func pickRandomBalanceLessThanHalf(
 	randomBal := halfBal.QuoRaw(divisor)
 	return randomBal, nil
 }
-
-// helper function to check if an error was thrown cumulatively
-func orErr(wasBeforeErr bool, err error) bool {
-	return wasBeforeErr || err != nil
-}

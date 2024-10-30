@@ -21,7 +21,7 @@ type StateTransitionFunc func(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-)
+) bool
 
 // keep track of the name of the state transition as well as the function
 type StateTransition struct {
@@ -343,11 +343,10 @@ func pickActorAndTopicIdForStateTransition(
 		}
 		amount := pickPercentOfStakeByDelegator(m, topicId, delegator, reputer, data, iteration)
 		return true, delegator, reputer, &amount, topicId
-	/*case "cancelStakeRemoval":
-		return true
-	case "cancelDelegateStakeRemoval":
-		return true
-	*/
+	// case "cancelStakeRemoval":
+	// 	return true, UnusedActor, UnusedActor, nil, 0
+	// case "cancelDelegateStakeRemoval":
+	// 	return true, UnusedActor, UnusedActor, nil, 0
 	case "collectDelegatorRewards":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
 		if err != nil {

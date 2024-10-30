@@ -139,11 +139,19 @@ func (s *SimulationData) pickRandomRegisteredReputer() (Actor, uint64, error) {
 
 // pickRandomStakedReputer picks a random reputer that is currently staked
 func (s *SimulationData) pickRandomStakedReputer() (Actor, uint64, error) {
-	ret, err := s.reputerStakes.RandomKey()
+	actor, topicId, err := s.pickRandomRegisteredReputer()
 	if err != nil {
 		return Actor{}, 0, err
 	}
-	return ret.Actor, ret.TopicId, nil
+	reg := Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	}
+	_, exists := s.reputerStakes.Get(reg)
+	if !exists {
+		return Actor{}, 0, fmt.Errorf("Registered reputer %s is not staked", actor.addr)
+	}
+	return actor, topicId, nil
 }
 
 // pickRandomDelegator picks a random delegator that is currently staked
@@ -152,6 +160,15 @@ func (s *SimulationData) pickRandomStakedDelegator() (Actor, Actor, uint64, erro
 	if err != nil {
 		return Actor{}, Actor{}, 0, err
 	}
+
+	if !s.isReputerRegistered(ret.TopicId, ret.Reputer) {
+		return Actor{}, Actor{}, 0, fmt.Errorf(
+			"Delegator %s is staked in reputer %s, but reputer is not registered",
+			ret.Delegator.addr,
+			ret.Reputer.addr,
+		)
+	}
+
 	return ret.Delegator, ret.Reputer, ret.TopicId, nil
 }
 
@@ -245,11 +262,9 @@ func (s *SimulationData) getReputersForTopicWithStake(topicId uint64) []Actor {
 // randomly flip the fail on err case to decide whether to be aggressive and fuzzy or
 // behaved state transitions
 func (s *SimulationData) randomlyFlipFailOnErr(m *testcommon.TestConfig, iteration int) {
-	if iteration < 20 { // first 20 iterations be behaved
-		s.failOnErr = true
-	} else { // after the start, be 20% likely to change from what you were previously
-		if m.Client.Rand.Intn(10) >= 8 {
-			s.failOnErr = !s.failOnErr
-		}
+	// 20% likely to change from what you were previously
+	if m.Client.Rand.Intn(10) >= 8 {
+		iterLog(m.T, iteration, "Changing fuzzer mode: failOnErr changing from", s.failOnErr, "to", !s.failOnErr)
+		s.failOnErr = !s.failOnErr
 	}
 }
