@@ -1,0 +1,28 @@
+{
+	"transitionWeights": {
+		"CreateTopic": 2,
+		"FundTopic": 10,
+		"RegisterWorker": 4,
+		"RegisterReputer": 4,
+		"StakeAsReputer": 10,
+		"DelegateStake": 10,
+		"CollectDelegatorRewards": 10,
+		"DoInferenceAndReputation": 30,
+		"UnregisterWorker": 4,
+		"UnregisterReputer": 4,
+		"UnstakeAsReputer": 6,
+		"UndelegateStake": 6,
+		"CancelStakeRemoval": 0,
+		"CancelDelegateStakeRemoval": 0
+	},
+	"seed": 0,
+	"rpcMode": "SingleRpc",
+	"rpcUrls": [
+		"http://localhost:26657"
+	],
+	"maxIterations": 0,
+	"mode": "alternate",
+	"alternateWeight": 20,
+	"numActors": 12,
+	"epochLength": 12
+}

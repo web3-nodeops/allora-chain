@@ -9,6 +9,7 @@ import (
 	cosmossdk_io_math "cosmossdk.io/math"
 	"github.com/allora-network/allora-chain/app/params"
 	testcommon "github.com/allora-network/allora-chain/test/common"
+	fuzzcommon "github.com/allora-network/allora-chain/test/fuzz/common"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
@@ -22,7 +23,7 @@ func simulateSetUp(
 	m *testcommon.TestConfig,
 	numActors int,
 	epochLength int,
-	mode SimulationMode,
+	mode fuzzcommon.SimulationMode,
 	seed int,
 ) (
 	faucet Actor,
@@ -89,7 +90,7 @@ func simulateSetUp(
 		failOnErr:          false,
 	}
 	// if we're in manual mode or behaving mode we want to fail on errors
-	if mode == Manual || mode == Behave {
+	if mode == fuzzcommon.Manual || mode == fuzzcommon.Behave {
 		data.failOnErr = true
 	}
 	return faucet, &data

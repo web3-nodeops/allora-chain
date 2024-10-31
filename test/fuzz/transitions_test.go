@@ -50,8 +50,8 @@ type StateTransition struct {
 // produce an inference (insert worker payloads),
 // produce reputation scores (insert reputer payloads)
 // NOTE: all weights must sum to 100
-func allTransitions() []StateTransition {
-	transitionWeights := fuzzcommon.GetTransitionWeights()
+func allTransitions(f *fuzzcommon.FuzzConfig) []StateTransition {
+	transitionWeights := f.TransitionWeights
 	transitionCreateTopic := StateTransition{
 		name: "createTopic", f: createTopic,
 		weight: transitionWeights.CreateTopic,
@@ -146,9 +146,9 @@ func allTransitions() []StateTransition {
 // weight transitions that add registrations or stake, more heavily than those that take it away
 // 70% of the time do additive stuff
 // 30% of the time do subtractive stuff
-func pickTransitionWithWeight(m *testcommon.TestConfig) StateTransition {
-	transitions := allTransitions()
-	rand := m.Client.Rand.Intn(100)
+func pickTransitionWithWeight(f *fuzzcommon.FuzzConfig) StateTransition {
+	transitions := allTransitions(f)
+	rand := f.TestConfig.Client.Rand.Intn(100)
 	threshold := uint8(0)
 	prevThreshold := uint8(0)
 	for _, transition := range transitions {
@@ -234,10 +234,22 @@ func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transiti
 // is this specific combination of actors, amount, and topicId valid for the transition?
 func isValidTransition(m *testcommon.TestConfig, transition StateTransition, actor1 Actor, actor2 Actor, amount *cosmossdk_io_math.Int, topicId uint64, data *SimulationData, iteration int) bool {
 	switch transition.name {
+	case "registerWorker":
+		// can't register twice
+		if data.isWorkerRegisteredInTopic(topicId, actor1) {
+			return false
+		}
+		return true
+	case "registerReputer":
+		// can't register twice
+		if data.isReputerRegisteredInTopic(topicId, actor1) {
+			return false
+		}
+		return true
 	case "collectDelegatorRewards":
 		// if the reputer unregisters before the delegator withdraws stake, it can be invalid for a
 		// validator to collective rewards
-		if !data.isReputerRegistered(topicId, actor2) {
+		if !data.isReputerRegisteredInTopic(topicId, actor2) {
 			iterLog(m.T, iteration, "Transition not valid: ", transition.name, actor1, actor2, amount, topicId)
 			return false
 		}
@@ -343,10 +355,6 @@ func pickActorAndTopicIdForStateTransition(
 		}
 		amount := pickPercentOfStakeByDelegator(m, topicId, delegator, reputer, data, iteration)
 		return true, delegator, reputer, &amount, topicId
-	// case "cancelStakeRemoval":
-	// 	return true, UnusedActor, UnusedActor, nil, 0
-	// case "cancelDelegateStakeRemoval":
-	// 	return true, UnusedActor, UnusedActor, nil, 0
 	case "collectDelegatorRewards":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
 		if err != nil {

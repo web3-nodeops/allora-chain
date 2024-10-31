@@ -316,11 +316,6 @@ func StakingInvariantSumStakeFromStakeReputerAuthorityEqualTotalStakeAndTopicSta
 
 func StakingInvariantPendingRewardForDelegatorsGreaterThanRewardPerShareMinusRewardDebt(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
-		type TopicAndReputer struct {
-			topicId uint64
-			reputer string
-		}
-
 		// first get the balance of the pending reward for delegators account
 		// this is the total amount of rewards that we hold on behalf of delegators
 		alloraPendingAddr := k.authKeeper.GetModuleAccount(ctx, emissionstypes.AlloraPendingRewardForDelegatorAccountName).GetAddress()

@@ -8,6 +8,7 @@ import (
 
 	cosmossdk_io_math "cosmossdk.io/math"
 	testcommon "github.com/allora-network/allora-chain/test/common"
+	fuzzcommon "github.com/allora-network/allora-chain/test/fuzz/common"
 )
 
 // SimulationData stores the active set of states we think we're in
@@ -23,7 +24,7 @@ type SimulationData struct {
 	reputerStakes      *testcommon.RandomKeyMap[Registration, struct{}]
 	delegatorStakes    *testcommon.RandomKeyMap[Delegation, struct{}]
 	failOnErr          bool
-	mode               SimulationMode
+	mode               fuzzcommon.SimulationMode
 }
 
 // String is the stringer for SimulationData
@@ -161,7 +162,7 @@ func (s *SimulationData) pickRandomStakedDelegator() (Actor, Actor, uint64, erro
 		return Actor{}, Actor{}, 0, err
 	}
 
-	if !s.isReputerRegistered(ret.TopicId, ret.Reputer) {
+	if !s.isReputerRegisteredInTopic(ret.TopicId, ret.Reputer) {
 		return Actor{}, Actor{}, 0, fmt.Errorf(
 			"Delegator %s is staked in reputer %s, but reputer is not registered",
 			ret.Delegator.addr,
@@ -192,8 +193,17 @@ func pickPercentOf(rand *rand.Rand, stake cosmossdk_io_math.Int) cosmossdk_io_ma
 	}
 }
 
-// isReputerRegistered checks if a reputer is registered
-func (s *SimulationData) isReputerRegistered(topicId uint64, actor Actor) bool {
+// isWorkerRegisteredInTopic checks if a worker is registered in a topic
+func (s *SimulationData) isWorkerRegisteredInTopic(topicId uint64, actor Actor) bool {
+	_, exists := s.registeredWorkers.Get(Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	})
+	return exists
+}
+
+// isReputerRegisteredInTopic checks if a reputer is registered
+func (s *SimulationData) isReputerRegisteredInTopic(topicId uint64, actor Actor) bool {
 	_, exists := s.registeredReputers.Get(Registration{
 		TopicId: topicId,
 		Actor:   actor,
@@ -261,10 +271,11 @@ func (s *SimulationData) getReputersForTopicWithStake(topicId uint64) []Actor {
 
 // randomly flip the fail on err case to decide whether to be aggressive and fuzzy or
 // behaved state transitions
-func (s *SimulationData) randomlyFlipFailOnErr(m *testcommon.TestConfig, iteration int) {
-	// 20% likely to change from what you were previously
-	if m.Client.Rand.Intn(10) >= 8 {
-		iterLog(m.T, iteration, "Changing fuzzer mode: failOnErr changing from", s.failOnErr, "to", !s.failOnErr)
+func (s *SimulationData) randomlyFlipFailOnErr(f *fuzzcommon.FuzzConfig, iteration int) {
+	flip := f.TestConfig.Client.Rand.Intn(100)
+	// f.AlternateWeight % likelihood to flip the failOnErr mode
+	if flip < f.AlternateWeight {
+		iterLog(f.TestConfig.T, iteration, "Changing fuzzer mode: failOnErr changing from", s.failOnErr, "to", !s.failOnErr)
 		s.failOnErr = !s.failOnErr
 	}
 }
