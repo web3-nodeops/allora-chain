@@ -19,8 +19,7 @@ func createTopic(
 	_ uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(m.T, iteration, actor, "creating new topic")
 	createTopicRequest := &emissionstypes.CreateNewTopicRequest{
 		Creator:                  actor.addr,
@@ -41,30 +40,30 @@ func createTopic(
 
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, createTopicRequest)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, actor, " failed to create topic")
-		return
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx wait error", err)
+		return false
+	}
 
 	createTopicResponse := &emissionstypes.CreateNewTopicResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(createTopicResponse)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.counts.incrementCreateTopicCount()
-		iterSuccessLog(m.T, iteration, actor, " created topic ", createTopicResponse.TopicId)
-		return
-	} else {
-		iterFailLog(m.T, iteration, actor, " failed to create topic")
-		return
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx decode error", err)
+		return false
 	}
+
+	data.counts.incrementCreateTopicCount()
+	iterSuccessLog(m.T, iteration, actor, "created topic", createTopicResponse.TopicId)
+	return true
 }
 
 // use actor to fund topic, picked randomly
@@ -76,9 +75,8 @@ func fundTopic(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
-	iterLog(m.T, iteration, actor, "funding topic in amount ", amount)
+) (success bool) {
+	iterLog(m.T, iteration, actor, "funding topic in amount", amount)
 	fundTopicRequest := &emissionstypes.FundTopicRequest{
 		Sender:  actor.addr,
 		TopicId: topicId,
@@ -87,21 +85,20 @@ func fundTopic(
 
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, fundTopicRequest)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, actor, " failed to fund topic ", topicId)
-		return
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, actor, "failed to fund topic", topicId, "tx broadcast error", err)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.counts.incrementFundTopicCount()
-		iterSuccessLog(m.T, iteration, actor, " funded topic ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, actor, " failed to fund topic ", topicId)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(m.T, iteration, actor, "failed to fund topic", topicId, "tx wait error", err)
+		return false
 	}
+
+	data.counts.incrementFundTopicCount()
+	iterSuccessLog(m.T, iteration, actor, " funded topic ", topicId)
+	return true
 }

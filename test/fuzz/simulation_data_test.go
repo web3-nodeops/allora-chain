@@ -8,7 +8,7 @@ import (
 
 	cosmossdk_io_math "cosmossdk.io/math"
 	testcommon "github.com/allora-network/allora-chain/test/common"
-	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
+	fuzzcommon "github.com/allora-network/allora-chain/test/fuzz/common"
 )
 
 // SimulationData stores the active set of states we think we're in
@@ -21,10 +21,10 @@ type SimulationData struct {
 	counts             StateTransitionCounts
 	registeredWorkers  *testcommon.RandomKeyMap[Registration, struct{}]
 	registeredReputers *testcommon.RandomKeyMap[Registration, struct{}]
-	reputerStakes      *testcommon.RandomKeyMap[Registration, cosmossdk_io_math.Int]
-	delegatorStakes    *testcommon.RandomKeyMap[Delegation, cosmossdk_io_math.Int]
+	reputerStakes      *testcommon.RandomKeyMap[Registration, struct{}]
+	delegatorStakes    *testcommon.RandomKeyMap[Delegation, struct{}]
 	failOnErr          bool
-	mode               SimulationMode
+	mode               fuzzcommon.SimulationMode
 }
 
 // String is the stringer for SimulationData
@@ -78,11 +78,45 @@ func (s *SimulationData) addReputerRegistration(topicId uint64, actor Actor) {
 	}, struct{}{})
 }
 
+// addReputerStaked adds a reputer stake to the list of staked reputers in the simulation data
+func (s *SimulationData) addReputerStaked(topicId uint64, actor Actor) {
+	s.reputerStakes.Upsert(Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	}, struct{}{})
+}
+
+// addDelegatorDelegated adds a delegator stake to the list of staked delegators in the simulation data
+func (s *SimulationData) addDelegatorDelegated(topicId uint64, delegator Actor, reputer Actor) {
+	s.delegatorStakes.Upsert(Delegation{
+		TopicId:   topicId,
+		Delegator: delegator,
+		Reputer:   reputer,
+	}, struct{}{})
+}
+
 // removeReputerRegistration removes a reputer registration from the simulation data
 func (s *SimulationData) removeReputerRegistration(topicId uint64, actor Actor) {
 	s.registeredReputers.Delete(Registration{
 		TopicId: topicId,
 		Actor:   actor,
+	})
+}
+
+// removeReputerStaked removes a reputer stake from the list of staked reputers in the simulation data
+func (s *SimulationData) removeReputerStaked(topicId uint64, actor Actor) {
+	s.reputerStakes.Delete(Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	})
+}
+
+// removeDelegatorDelegated removes a delegator stake from the list of staked delegators in the simulation data
+func (s *SimulationData) removeDelegatorDelegated(topicId uint64, delegator Actor, reputer Actor) {
+	s.delegatorStakes.Delete(Delegation{
+		TopicId:   topicId,
+		Delegator: delegator,
+		Reputer:   reputer,
 	})
 }
 
@@ -106,11 +140,19 @@ func (s *SimulationData) pickRandomRegisteredReputer() (Actor, uint64, error) {
 
 // pickRandomStakedReputer picks a random reputer that is currently staked
 func (s *SimulationData) pickRandomStakedReputer() (Actor, uint64, error) {
-	ret, err := s.reputerStakes.RandomKey()
+	actor, topicId, err := s.pickRandomRegisteredReputer()
 	if err != nil {
 		return Actor{}, 0, err
 	}
-	return ret.Actor, ret.TopicId, nil
+	reg := Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	}
+	_, exists := s.reputerStakes.Get(reg)
+	if !exists {
+		return Actor{}, 0, fmt.Errorf("Registered reputer %s is not staked", actor.addr)
+	}
+	return actor, topicId, nil
 }
 
 // pickRandomDelegator picks a random delegator that is currently staked
@@ -119,93 +161,16 @@ func (s *SimulationData) pickRandomStakedDelegator() (Actor, Actor, uint64, erro
 	if err != nil {
 		return Actor{}, Actor{}, 0, err
 	}
+
+	if !s.isReputerRegisteredInTopic(ret.TopicId, ret.Reputer) {
+		return Actor{}, Actor{}, 0, fmt.Errorf(
+			"Delegator %s is staked in reputer %s, but reputer is not registered",
+			ret.Delegator.addr,
+			ret.Reputer.addr,
+		)
+	}
+
 	return ret.Delegator, ret.Reputer, ret.TopicId, nil
-}
-
-// addReputerStake adds a reputer stake to the simulation data
-func (s *SimulationData) addReputerStake(
-	topicId uint64,
-	actor Actor,
-	amount cosmossdk_io_math.Int,
-) {
-	reg := Registration{
-		TopicId: topicId,
-		Actor:   actor,
-	}
-	prevStake, exists := s.reputerStakes.Get(reg)
-	if !exists {
-		prevStake = cosmossdk_io_math.ZeroInt()
-	}
-	newValue := prevStake.Add(amount)
-	s.reputerStakes.Upsert(reg, newValue)
-}
-
-// markStakeRemovalReputerStake marks a reputer stake for removal in the simulation data
-// rather than try to keep copy of such complex state, we just pretend removals are instant
-func (s *SimulationData) markStakeRemovalReputerStake(
-	topicId uint64,
-	actor Actor,
-	amount *cosmossdk_io_math.Int,
-) {
-	reg := Registration{
-		TopicId: topicId,
-		Actor:   actor,
-	}
-	prevStake, exists := s.reputerStakes.Get(reg)
-	if !exists {
-		prevStake = cosmossdk_io_math.ZeroInt()
-	}
-	newValue := prevStake.Sub(*amount)
-	if newValue.IsNegative() {
-		panic(
-			fmt.Sprintf(
-				"negative stake disallowed, topic id %d actor %s amount %s",
-				topicId,
-				actor,
-				amount,
-			),
-		)
-	}
-	if !newValue.IsZero() {
-		s.reputerStakes.Upsert(reg, newValue)
-	} else {
-		s.reputerStakes.Delete(reg)
-	}
-}
-
-// markStakeRemovalDelegatorStake marks a delegator stake for removal in the simulation data
-func (s *SimulationData) markStakeRemovalDelegatorStake(
-	topicId uint64,
-	delegator Actor,
-	reputer Actor,
-	amount *cosmossdk_io_math.Int,
-) {
-	del := Delegation{
-		TopicId:   topicId,
-		Delegator: delegator,
-		Reputer:   reputer,
-	}
-	prevStake, exists := s.delegatorStakes.Get(del)
-	if !exists {
-		prevStake = cosmossdk_io_math.ZeroInt()
-	}
-	newValue := prevStake.Sub(*amount)
-	if newValue.IsNegative() {
-		panic(
-			fmt.Sprintf(
-				"negative stake disallowed, topic id %d delegator %s reputer %s amount %s",
-				topicId,
-				delegator,
-				reputer,
-				amount,
-			),
-		)
-	}
-	if !newValue.IsZero() {
-		s.delegatorStakes.Upsert(del, newValue)
-	} else {
-		s.delegatorStakes.Delete(del)
-	}
 }
 
 // take a percentage of the stake, either 1/10, 1/3, 1/2, 6/7, or the full amount
@@ -228,64 +193,17 @@ func pickPercentOf(rand *rand.Rand, stake cosmossdk_io_math.Int) cosmossdk_io_ma
 	}
 }
 
-// pickPercentOfStakeByReputer picks a random percent (1/10, 1/3, 1/2, 6/7, or full amount) of the stake by a reputer
-func (s *SimulationData) pickPercentOfStakeByReputer(
-	rand *rand.Rand,
-	topicId uint64,
-	actor Actor,
-) cosmossdk_io_math.Int {
-	reg := Registration{
+// isWorkerRegisteredInTopic checks if a worker is registered in a topic
+func (s *SimulationData) isWorkerRegisteredInTopic(topicId uint64, actor Actor) bool {
+	_, exists := s.registeredWorkers.Get(Registration{
 		TopicId: topicId,
 		Actor:   actor,
-	}
-	stake, exists := s.reputerStakes.Get(reg)
-	if !exists {
-		return cosmossdk_io_math.ZeroInt()
-	}
-	return pickPercentOf(rand, stake)
+	})
+	return exists
 }
 
-// pick a random percent (1/10, 1/3, 1/2, 6/7, or full amount) of the stake that a delegator has in a reputer
-func (s *SimulationData) pickPercentOfStakeByDelegator(
-	rand *rand.Rand,
-	topicId uint64,
-	delegator Actor,
-	reputer Actor,
-) cosmossdk_io_math.Int {
-	del := Delegation{
-		TopicId:   topicId,
-		Delegator: delegator,
-		Reputer:   reputer,
-	}
-	stake, exists := s.delegatorStakes.Get(del)
-	if !exists {
-		return cosmossdk_io_math.ZeroInt()
-	}
-	return pickPercentOf(rand, stake)
-}
-
-// addDelegatorStake adds a delegator stake to the simulation data
-func (s *SimulationData) addDelegatorStake(
-	topicId uint64,
-	delegator Actor,
-	reputer Actor,
-	amount cosmossdk_io_math.Int,
-) {
-	delegation := Delegation{
-		TopicId:   topicId,
-		Delegator: delegator,
-		Reputer:   reputer,
-	}
-	prevStake, exists := s.delegatorStakes.Get(delegation)
-	if !exists {
-		prevStake = cosmossdk_io_math.ZeroInt()
-	}
-	newValue := prevStake.Add(amount)
-	s.delegatorStakes.Upsert(delegation, newValue)
-}
-
-// isReputerRegistered checks if a reputer is registered
-func (s *SimulationData) isReputerRegistered(topicId uint64, actor Actor) bool {
+// isReputerRegisteredInTopic checks if a reputer is registered
+func (s *SimulationData) isReputerRegisteredInTopic(topicId uint64, actor Actor) bool {
 	_, exists := s.registeredReputers.Get(Registration{
 		TopicId: topicId,
 		Actor:   actor,
@@ -351,28 +269,13 @@ func (s *SimulationData) getReputersForTopicWithStake(topicId uint64) []Actor {
 	return ret
 }
 
-// get an actor object from an address
-func (s *SimulationData) getActorFromAddr(addr string) (Actor, bool) {
-	for _, actor := range s.actors {
-		if actor.addr == addr {
-			return actor, true
-		}
-	}
-	return Actor{
-		name: "",
-		addr: "",
-		acc:  cosmosaccount.Account{Name: "", Record: nil},
-	}, false
-}
-
 // randomly flip the fail on err case to decide whether to be aggressive and fuzzy or
 // behaved state transitions
-func (s *SimulationData) randomlyFlipFailOnErr(m *testcommon.TestConfig, iteration int) {
-	if iteration < 20 { // first 20 iterations be behaved
-		s.failOnErr = true
-	} else { // after the start, be 20% likely to change from what you were previously
-		if m.Client.Rand.Intn(10) >= 8 {
-			s.failOnErr = !s.failOnErr
-		}
+func (s *SimulationData) randomlyFlipFailOnErr(f *fuzzcommon.FuzzConfig, iteration int) {
+	flip := f.TestConfig.Client.Rand.Intn(100)
+	// f.AlternateWeight % likelihood to flip the failOnErr mode
+	if flip < f.AlternateWeight {
+		iterLog(f.TestConfig.T, iteration, "Changing fuzzer mode: failOnErr changing from", s.failOnErr, "to", !s.failOnErr)
+		s.failOnErr = !s.failOnErr
 	}
 }

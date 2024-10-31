@@ -59,11 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* [#654](https://github.com/allora-network/allora-chain/pull/654) Reorganize Linter Folder, add linter to check fuzzer state transition probabilities add to 100 percent
+
 ### Changed
 
 * [#652](https://github.com/allora-network/allora-chain/pull/652) Reduce code duplication, set local_testnet_upgrade_l1.sh using environment variables with local_testnet_l1.sh instead
 * [#650](https://github.com/allora-network/allora-chain/pull/650) Make fuzzer setup run through every state transition once before fuzzing starts
 * [#651](https://github.com/allora-network/allora-chain/pull/651) Refactor: Fuzzer rename invariants test to fuzz test
+* [#653](https://github.com/allora-network/allora-chain/pull/653) Fuzzer Bugfixes, Allow User to Set Fuzzer Transition Probability Distribution
 
 ### Deprecated
 

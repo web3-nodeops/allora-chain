@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 
 	cosmossdk_io_math "cosmossdk.io/math"
 	"github.com/allora-network/allora-chain/app/params"
 	testcommon "github.com/allora-network/allora-chain/test/common"
+	fuzzcommon "github.com/allora-network/allora-chain/test/fuzz/common"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
@@ -21,7 +23,8 @@ func simulateSetUp(
 	m *testcommon.TestConfig,
 	numActors int,
 	epochLength int,
-	mode SimulationMode,
+	mode fuzzcommon.SimulationMode,
+	seed int,
 ) (
 	faucet Actor,
 	simulationData *SimulationData,
@@ -47,6 +50,19 @@ func simulateSetUp(
 	if err != nil {
 		m.T.Fatal(err)
 	}
+
+	// ensure each random key map has a different random number generator
+	// so that map accesses don't step on each other
+	registeredWorkersMapRand := rand.New(rand.NewSource(int64(seed)))
+	registeredReputersMapRand := rand.New(rand.NewSource(int64(seed)))
+	reputerStakesMapRand := rand.New(rand.NewSource(int64(seed)))
+	delegatorStakesMapRand := rand.New(rand.NewSource(int64(seed)))
+
+	registeredWorkers := testcommon.NewRandomKeyMap[Registration, struct{}](registeredWorkersMapRand)
+	registeredReputers := testcommon.NewRandomKeyMap[Registration, struct{}](registeredReputersMapRand)
+	reputerStakes := testcommon.NewRandomKeyMap[Registration, struct{}](reputerStakesMapRand)
+	delegatorStakes := testcommon.NewRandomKeyMap[Delegation, struct{}](delegatorStakesMapRand)
+
 	data := SimulationData{
 		epochLength: int64(epochLength),
 		actors:      actorsList,
@@ -66,19 +82,15 @@ func simulateSetUp(
 			collectDelegatorRewards:    0,
 			doInferenceAndReputation:   0,
 		},
-		registeredWorkers:  testcommon.NewRandomKeyMap[Registration, struct{}](m.Client.Rand),
-		registeredReputers: testcommon.NewRandomKeyMap[Registration, struct{}](m.Client.Rand),
-		reputerStakes: testcommon.NewRandomKeyMap[Registration, cosmossdk_io_math.Int](
-			m.Client.Rand,
-		),
-		delegatorStakes: testcommon.NewRandomKeyMap[Delegation, cosmossdk_io_math.Int](
-			m.Client.Rand,
-		),
-		mode:      mode,
-		failOnErr: false,
+		registeredWorkers:  registeredWorkers,
+		registeredReputers: registeredReputers,
+		reputerStakes:      reputerStakes,
+		delegatorStakes:    delegatorStakes,
+		mode:               mode,
+		failOnErr:          false,
 	}
 	// if we're in manual mode or behaving mode we want to fail on errors
-	if mode == Manual || mode == Behave {
+	if mode == fuzzcommon.Manual || mode == fuzzcommon.Behave {
 		data.failOnErr = true
 	}
 	return faucet, &data
@@ -90,22 +102,7 @@ func createNewActor(m *testcommon.TestConfig, numActors int) Actor {
 	actorAccount, _, err := m.Client.AccountRegistryCreate(actorName)
 	if err != nil {
 		if errors.Is(err, cosmosaccount.ErrAccountExists) {
-			m.T.Log("WARNING WARNING WARNING\nACTOR ACCOUNTS ALREADY EXIST, YOU ARE REUSING YOUR SEED VALUE\nNON-DETERMINISM-DRAGONS AHEAD\nWARNING WARNING WARNING")
-			actorAccount, err := m.Client.AccountRegistryGetByName(actorName)
-			if err != nil {
-				m.T.Log("Error getting actor account: ", actorName, " - ", err)
-				return UnusedActor
-			}
-			actorAddress, err := actorAccount.Address(params.HumanCoinUnit)
-			if err != nil {
-				m.T.Log("Error creating actor address: ", actorName, " - ", err)
-				return UnusedActor
-			}
-			return Actor{
-				name: actorName,
-				addr: actorAddress,
-				acc:  actorAccount,
-			}
+			panic(fmt.Errorf("cannot re-use seed values across test runs, please restart the node from a clean configuration or use a different seed value"))
 		} else {
 			m.T.Log("Error creating actor address: ", actorName, " - ", err)
 			return UnusedActor
@@ -276,12 +273,14 @@ func startRegisterReputers(
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
 			// register reputer on the topic
-			registerReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := registerReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 			// stake reputer on the topic
 			bal, err := pickRandomBalanceLessThanHalf(m, reputer)
-			requireNoError(m.T, true, err)
-			stakeAsReputer(m, reputer, UnusedActor, &bal, topicId, data, iterationCount)
+			failIfOnErr(m.T, true, err)
+			success = stakeAsReputer(m, reputer, UnusedActor, &bal, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -299,7 +298,8 @@ func startRegisterWorkers(
 	iterationCount := iterationCountStart
 	for _, worker := range startWorkers {
 		for _, topicId := range listTopics {
-			registerWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			success := registerWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -319,8 +319,9 @@ func startDelegateDelegators(
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
 			bal, err := pickRandomBalanceLessThanHalf(m, delegator)
-			requireNoError(m.T, true, err)
-			delegateStake(m, delegator, startReputers[i], &bal, topicId, data, iterationCount)
+			failIfOnErr(m.T, true, err)
+			success := delegateStake(m, delegator, startReputers[i], &bal, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -338,8 +339,9 @@ func startFundTopics(
 	iterationCount := iterationCountStart
 	for _, topicId := range listTopics {
 		fundAmount, err := pickRandomBalanceLessThanHalf(m, faucet)
-		requireNoError(m.T, true, err)
-		fundTopic(m, faucet, UnusedActor, &fundAmount, topicId, data, iterationCount)
+		failIfOnErr(m.T, true, err)
+		success := fundTopic(m, faucet, UnusedActor, &fundAmount, topicId, data, iterationCount)
+		require.True(m.T, success)
 		iterationCount++
 	}
 	return iterationCount
@@ -354,7 +356,8 @@ func startDoInferenceAndReputation(
 ) (iterationCountAfter int) {
 	iterationCount := iterationCountStart
 	for _, topicId := range listTopics {
-		doInferenceAndReputation(m, UnusedActor, UnusedActor, nil, topicId, data, iterationCount)
+		success := doInferenceAndReputation(m, UnusedActor, UnusedActor, nil, topicId, data, iterationCount)
+		require.True(m.T, success)
 		iterationCount++
 	}
 	return iterationCount
@@ -372,7 +375,8 @@ func startCollectDelegatorRewards(
 	iterationCount := iterationCountStart
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
-			collectDelegatorRewards(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			success := collectDelegatorRewards(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -390,7 +394,8 @@ func startUnregisterWorkers(
 	iterationCount := iterationCountStart
 	for _, worker := range startWorkers {
 		for _, topicId := range listTopics {
-			unregisterWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			success := unregisterWorker(m, worker, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -408,7 +413,8 @@ func startUnregisterReputers(
 	iterationCount := iterationCountStart
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
-			unregisterReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := unregisterReputer(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -427,8 +433,9 @@ func startUndelegateStake(
 	iterationCount := iterationCountStart
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
-			amount := data.pickPercentOfStakeByDelegator(m.Client.Rand, topicId, delegator, startReputers[i])
-			undelegateStake(m, delegator, startReputers[i], &amount, topicId, data, iterationCount)
+			amount := pickPercentOfStakeByDelegator(m, topicId, delegator, startReputers[i], data, iterationCount)
+			success := undelegateStake(m, delegator, startReputers[i], &amount, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -446,8 +453,9 @@ func startUnstakeAsReputer(
 	iterationCount := iterationCountStart
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
-			amount := data.pickPercentOfStakeByReputer(m.Client.Rand, topicId, reputer)
-			unstakeAsReputer(m, reputer, UnusedActor, &amount, topicId, data, iterationCount)
+			amount := pickPercentOfStakeByReputer(m, topicId, reputer, data, iterationCount)
+			success := unstakeAsReputer(m, reputer, UnusedActor, &amount, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -465,7 +473,8 @@ func startCancelStakeRemoval(
 	iterationCount := iterationCountStart
 	for _, reputer := range startReputers {
 		for _, topicId := range listTopics {
-			cancelStakeRemoval(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			success := cancelStakeRemoval(m, reputer, UnusedActor, nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -485,7 +494,8 @@ func startCancelDelegateStakeRemoval(
 	iterationCount := iterationCountStart
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
-			cancelDelegateStakeRemoval(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			success := cancelDelegateStakeRemoval(m, delegator, startReputers[i], nil, topicId, data, iterationCount)
+			require.True(m.T, success)
 			iterationCount++
 		}
 	}
@@ -508,9 +518,11 @@ func simulateAutomaticInitialState(
 	// additive actions
 
 	// create two topics
-	createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	success := createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	require.True(m.T, success)
 	iterationCount++
-	createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	success = createTopic(m, faucet, UnusedActor, nil, 0, data, iterationCount)
+	require.True(m.T, success)
 	iterationCount++
 	// pick 4 reputers, 4 workers, and 2 delegators
 	startReputers, startWorkers, startDelegators := pickAutoSetupActors(m, data)

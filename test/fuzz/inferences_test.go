@@ -21,8 +21,7 @@ func doInferenceAndReputation(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -33,23 +32,63 @@ func doInferenceAndReputation(
 	resp, err := m.Client.QueryEmissions().GetTopic(ctx, &emissionstypes.GetTopicRequest{
 		TopicId: topicId,
 	})
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to upload inferences, forecast and reputations for topic id ",
+			topicId,
+			"query GetTopic error",
+			err,
+		)
+		return false
+	}
 	topic := resp.Topic
 	iterLog(m.T, iteration, "Inference topic epoch last ended ", topic.EpochLastEnded, " epoch length ", topic.EpochLength)
 	workerNonce := topic.EpochLastEnded + topic.EpochLength
 	blockHeightNow, err := m.Client.BlockHeight(ctx)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to upload inferences, forecast and reputations for topic id ",
+			topicId,
+			"block height query error",
+			err,
+		)
+		return false
+	}
 	if blockHeightNow < workerNonce+1 {
 		iterLog(m.T, iteration, "waiting for next epoch to start so we can produce inferences for the current epoch: ", workerNonce+1)
 		err = m.Client.WaitForBlockHeight(ctx, workerNonce+1)
-		requireNoError(m.T, data.failOnErr, err)
-		wasErr = orErr(wasErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
+		if err != nil {
+			iterFailLog(
+				m.T,
+				iteration,
+				"failed to upload inferences, forecast and reputations for topic id ",
+				topicId,
+				"wait for block height error",
+				err,
+			)
+			return false
+		}
 		// Update block height
 		blockHeightNow, err = m.Client.BlockHeight(ctx)
-		requireNoError(m.T, data.failOnErr, err)
-		wasErr = orErr(wasErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
+		if err != nil {
+			iterFailLog(
+				m.T,
+				iteration,
+				"failed to upload inferences, forecast and reputations for topic id ",
+				topicId,
+				"block height query2 error",
+				err,
+			)
+			return false
+		}
 	}
 	workers := data.getWorkersForTopic(topicId)
 	if len(workers) == 0 {
@@ -58,17 +97,27 @@ func doInferenceAndReputation(
 	iterLog(m.T, iteration, " starting worker payload topic id ", topicId,
 		" workers ", workers, "worker nonce ",
 		workerNonce, " block height now ", blockHeightNow)
-	workerPayloadFailed := createAndSendWorkerPayloads(m, data, topic, workers, workerNonce)
-	if workerPayloadFailed {
-		iterFailLog(m.T, iteration, "worker payload errored topic ", topicId)
-		return
+	workerPayloadSuccess := createAndSendWorkerPayloads(m, data, topic, workers, workerNonce, iteration)
+	if !workerPayloadSuccess {
+		iterFailLog(m.T, iteration, "worker payload errored topic", topicId)
+		return false
 	}
 	iterLog(m.T, iteration, "produced worker inference for topic id", topicId)
 	reputerWaitBlocks := blockHeightNow + topic.GroundTruthLag + 1
-	iterLog(m.T, iteration, "waiting for reputer ground truth block ", reputerWaitBlocks)
+	iterLog(m.T, iteration, "waiting for reputer ground truth block", reputerWaitBlocks)
 	err = m.Client.WaitForBlockHeight(ctx, reputerWaitBlocks)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"failed to upload inferences, forecast and reputations for topic id ",
+			topicId,
+			"wait for block height 3 error",
+			err,
+		)
+		return false
+	}
 	reputers := data.getReputersForTopicWithStake(topicId)
 	if len(reputers) == 0 {
 		iterFailLog(m.T, iteration, "len of reputers in active topic should always be greater than 0 ", topicId)
@@ -78,17 +127,15 @@ func doInferenceAndReputation(
 		" workers ", workers, " reputers ", reputers, " worker nonce ", workerNonce,
 		" block height  now ", reputerWaitBlocks,
 	)
-	reputationFailed := createAndSendReputerPayloads(m, data, topic, reputers, workers, workerNonce)
-	if reputationFailed {
+	reputationSuccess := createAndSendReputerPayloads(m, data, topic, reputers, workers, workerNonce, iteration)
+	if !reputationSuccess {
 		iterFailLog(m.T, iteration, "reputation flow failed topic id ", topicId)
-		return
+		return false
 	}
-	if !wasErr {
-		data.counts.incrementDoInferenceAndReputationCount()
-		iterSuccessLog(m.T, iteration, "uploaded inferences, forecasts, and reputations for topic id ", topicId)
-	} else {
-		iterFailLog(m.T, iteration, "failed to upload inferences, forecast and reputations for topic id ", topicId)
-	}
+
+	data.counts.incrementDoInferenceAndReputationCount()
+	iterSuccessLog(m.T, iteration, "uploaded inferences, forecasts, and reputations for topic id ", topicId)
+	return true
 }
 
 // determine if this state transition is worth trying based on our knowledge of the state
@@ -105,7 +152,7 @@ func findActiveTopicsAtThisBlock(
 	response, err := m.Client.QueryEmissions().GetActiveTopicsAtBlock(ctx, &emissionstypes.GetActiveTopicsAtBlockRequest{
 		BlockHeight: blockHeight,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	return response.Topics
 }
 
@@ -116,14 +163,17 @@ func createAndSendWorkerPayloads(
 	topic *emissionstypes.Topic,
 	workers []Actor,
 	workerNonce int64,
-) bool {
-	wasErr := false
+	iteration int,
+) (success bool) {
 	// Get Bundles
 	for _, worker := range workers {
 		workerData := createWorkerDataBundle(m, topic.Id, workerNonce, worker, workers)
-		wasErr = wasErr || sendWorkerPayload(m, data, worker, workerData)
+		success = sendWorkerPayload(m, data, worker, workerData, iteration)
+		if !success {
+			return false
+		}
 	}
-	return wasErr
+	return true
 }
 
 // create inferences and forecasts for a worker
@@ -192,27 +242,51 @@ func sendWorkerPayload(
 	data *SimulationData,
 	sender Actor,
 	WorkerDataBundles *emissionstypes.WorkerDataBundle,
+	iteration int,
 ) bool {
-	wasErr := false
-
 	workerMsg := &emissionstypes.InsertWorkerPayloadRequest{
 		Sender:           sender.addr,
 		WorkerDataBundle: WorkerDataBundles,
 	}
 	// serialize workerMsg to json and print
 	LeaderAcc, err := m.Client.AccountRegistryGetByName(sender.name)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"send worker payload error",
+			"could not get account by name",
+			err,
+		)
+		return false
+	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, LeaderAcc, workerMsg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		return wasErr
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"send worker payload error",
+			"broadcast tx error",
+			err,
+		)
+		return false
 	}
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	return orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"send worker payload error",
+			"wait for tx error",
+			err,
+		)
+		return false
+	}
+	return true
 }
 
 // reputers submit their assessment of the quality of workers' work compared to ground truth
@@ -223,8 +297,8 @@ func createAndSendReputerPayloads(
 	reputers,
 	workers []Actor,
 	workerNonce int64,
-) bool {
-	wasErr := false
+	iteration int,
+) (success bool) {
 	// Nonce: calculate from EpochLastRan + EpochLength
 	topicId := topic.Id
 	// Nonces are last two blockHeights
@@ -241,16 +315,31 @@ func createAndSendReputerPayloads(
 		}
 
 		txResp, err := m.Client.BroadcastTx(ctx, reputer.acc, lossesMsg)
-		requireNoError(m.T, data.failOnErr, err)
-		wasErr = orErr(wasErr, err)
-		if wasErr {
-			return wasErr
+		failIfOnErr(m.T, data.failOnErr, err)
+		if err != nil {
+			iterFailLog(
+				m.T,
+				iteration,
+				"send reputer payload error",
+				"broadcast tx error",
+				err,
+			)
+			return false
 		}
 		_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-		requireNoError(m.T, data.failOnErr, err)
-		wasErr = orErr(wasErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
+		if err != nil {
+			iterFailLog(
+				m.T,
+				iteration,
+				"send reputer payload error",
+				"wait for tx error",
+				err,
+			)
+			return false
+		}
 	}
-	return wasErr
+	return true
 }
 
 // Generate the same valueBundle for a reputer

@@ -32,7 +32,7 @@ func iterFailLog(t *testing.T, iteration int, a ...any) {
 }
 
 // wrapper around require.NoError to only error if noFail is false
-func requireNoError(t *testing.T, failOnErr bool, err error) {
+func failIfOnErr(t *testing.T, failOnErr bool, err error) {
 	t.Helper()
 	if failOnErr {
 		require.NoError(t, err)
@@ -100,9 +100,4 @@ func pickRandomBalanceLessThanHalf(
 	divisor := m.Client.Rand.Int63()%1000 + 1
 	randomBal := halfBal.QuoRaw(divisor)
 	return randomBal, nil
-}
-
-// helper function to check if an error was thrown cumulatively
-func orErr(wasBeforeErr bool, err error) bool {
-	return wasBeforeErr || err != nil
 }

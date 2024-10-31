@@ -9,6 +9,45 @@ import (
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
 )
 
+// helper function that queries the chain for the amount of stake that a reputer has in a topic
+func getReputerStakeFromChain(
+	m *testcommon.TestConfig,
+	actor Actor,
+	topicId uint64,
+	failOnErr bool,
+	iteration int,
+) cosmossdk_io_math.Int {
+	ctx := context.Background()
+	qe := m.Client.QueryEmissions()
+	stakeResp, err := qe.GetStakeFromReputerInTopicInSelf(ctx, &emissionstypes.GetStakeFromReputerInTopicInSelfRequest{
+		ReputerAddress: actor.addr,
+		TopicId:        topicId,
+	})
+	failIfOnErr(m.T, failOnErr, err)
+	iterLog(m.T, iteration, "Query chain stake from reputer in topic in self", actor, "in topic id", topicId, "is", stakeResp.Amount)
+	return stakeResp.Amount
+}
+
+// pickPercentOfStakeByReputer picks a random percent (1/10, 1/3, 1/2, 6/7, or full amount) of the stake by a reputer
+func pickPercentOfStakeByReputer(
+	m *testcommon.TestConfig,
+	topicId uint64,
+	actor Actor,
+	data *SimulationData,
+	iteration int,
+) cosmossdk_io_math.Int {
+	reg := Registration{
+		TopicId: topicId,
+		Actor:   actor,
+	}
+	_, exists := data.reputerStakes.Get(reg)
+	if !exists {
+		return cosmossdk_io_math.ZeroInt()
+	}
+	amount := getReputerStakeFromChain(m, actor, topicId, data.failOnErr, iteration)
+	return pickPercentOf(m.Client.Rand, amount)
+}
+
 // stake actor as a reputer, pick a random amount to stake that is less than half their current balance
 func stakeAsReputer(
 	m *testcommon.TestConfig,
@@ -18,8 +57,7 @@ func stakeAsReputer(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -37,38 +75,72 @@ func stakeAsReputer(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "stake failed", actor, "as a reputer in topic id ", topicId, " in amount ", amount.String())
-		return
-	}
-
-	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	response := &emissionstypes.AddStakeResponse{}
-	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.addReputerStake(topicId, actor, *amount)
-		data.counts.incrementStakeAsReputerCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"staked ",
+			"stake failed",
 			actor,
 			"as a reputer in topic id ",
 			topicId,
 			" in amount ",
 			amount.String(),
+			"tx broadcast error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "stake failed", actor, "as a reputer in topic id ", topicId, " in amount ", amount.String())
+		return false
 	}
+
+	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"stake failed",
+			actor,
+			"as a reputer in topic id ",
+			topicId,
+			" in amount ",
+			amount.String(),
+			"tx wait error",
+			err,
+		)
+		return false
+	}
+
+	response := &emissionstypes.AddStakeResponse{}
+	err = txResp.Decode(response)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"stake failed",
+			actor,
+			"as a reputer in topic id ",
+			topicId,
+			" in amount ",
+			amount.String(),
+			"tx decode error",
+			err,
+		)
+		return false
+	}
+	data.addReputerStaked(topicId, actor)
+	data.counts.incrementStakeAsReputerCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"staked ",
+		actor,
+		"as a reputer in topic id ",
+		topicId,
+		" in amount ",
+		amount.String(),
+	)
+	return true
 }
 
 // tell if any reputers are currently staked
@@ -92,8 +164,7 @@ func unstakeAsReputer(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -104,6 +175,7 @@ func unstakeAsReputer(
 		" in amount",
 		amount.String(),
 	)
+
 	msg := emissionstypes.RemoveStakeRequest{
 		Sender:  actor.addr,
 		TopicId: topicId,
@@ -111,75 +183,75 @@ func unstakeAsReputer(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "unstake failed", actor, "as a reputer in topic id ", topicId, " in amount ", amount.String())
-		return
-	}
-
-	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	response := &emissionstypes.RemoveStakeResponse{}
-	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.markStakeRemovalReputerStake(topicId, actor, amount)
-		data.counts.incrementUnstakeAsReputerCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"unstaked from ",
+			"unstake failed",
 			actor,
 			"as a reputer in topic id ",
 			topicId,
 			" in amount ",
 			amount.String(),
+			"tx broadcast error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "unstake failed", actor, "as a reputer in topic id ", topicId, " in amount ", amount.String())
+		return false
 	}
-}
 
-// ask the chain if any stake removals exist
-func findFirstValidStakeRemovalFromChain(m *testcommon.TestConfig) (emissionstypes.StakeRemovalInfo, bool, error) {
-	ctx := context.Background()
-	blockHeightNow, err := m.Client.BlockHeight(ctx)
+	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
-		return emissionstypes.StakeRemovalInfo{}, false, err
+		iterFailLog(
+			m.T,
+			iteration,
+			"unstake failed",
+			actor,
+			"as a reputer in topic id ",
+			topicId,
+			" in amount ",
+			amount.String(),
+			"tx wait error",
+			err,
+		)
+		return false
 	}
-	moduleParams, err := m.Client.QueryEmissions().GetParams(ctx, &emissionstypes.GetParamsRequest{})
+	response := &emissionstypes.RemoveStakeResponse{}
+	err = txResp.Decode(response)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
-		return emissionstypes.StakeRemovalInfo{}, false, err
+		iterFailLog(
+			m.T,
+			iteration,
+			"unstake failed",
+			actor,
+			"as a reputer in topic id ",
+			topicId,
+			" in amount ",
+			amount.String(),
+			"tx decode error",
+			err,
+		)
+		return false
 	}
-	blockHeightEnd := blockHeightNow + moduleParams.Params.RemoveStakeDelayWindow
-	for i := blockHeightNow; i < blockHeightEnd; i++ {
-		query := &emissionstypes.GetStakeRemovalsUpUntilBlockRequest{
-			BlockHeight: i,
-		}
-		resp, err := m.Client.QueryEmissions().GetStakeRemovalsUpUntilBlock(ctx, query)
-		if err != nil || resp == nil {
-			continue
-		}
-		if len(resp.Removals) == 0 {
-			continue
-		}
-		if resp.Removals[0] == nil {
-			continue
-		}
-		return *resp.Removals[0], true, nil
+	data.counts.incrementUnstakeAsReputerCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"unstaked from ",
+		actor,
+		"as a reputer in topic id ",
+		topicId,
+		" in amount ",
+		amount.String(),
+	)
+	// if the reputer will have no stake left after this unstake, remove them from the list of staked reputers
+	chainAmount := getReputerStakeFromChain(m, actor, topicId, data.failOnErr, iteration)
+	if chainAmount.Equal(*amount) {
+		data.removeReputerStaked(topicId, actor)
 	}
-	return emissionstypes.StakeRemovalInfo{
-		BlockRemovalStarted:   0,
-		TopicId:               0,
-		BlockRemovalCompleted: 0,
-		Reputer:               "",
-		Amount:                cosmossdk_io_math.Int{},
-	}, false, nil // no stake removal was found
+	return true
 }
 
 func cancelStakeRemoval(
@@ -190,8 +262,7 @@ func cancelStakeRemoval(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -206,35 +277,112 @@ func cancelStakeRemoval(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "cancelling stake removal as a reputer failed", actor, "in topic id", topicId)
-		return
-	}
-
-	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	response := &emissionstypes.CancelRemoveStakeResponse{}
-	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.counts.incrementCancelStakeRemovalCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"cancelled stake removal as a reputer",
+			"cancelling stake removal as a reputer failed",
 			actor,
 			"in topic id",
 			topicId,
+			"tx broadcast error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "cancelling stake removal as a reputer failed", actor, "in topic id", topicId)
+		return false
 	}
+
+	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"cancelling stake removal as a reputer failed",
+			actor,
+			"in topic id",
+			topicId,
+			"tx wait error",
+			err,
+		)
+		return false
+	}
+	response := &emissionstypes.CancelRemoveStakeResponse{}
+	err = txResp.Decode(response)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"cancelling stake removal as a reputer failed",
+			actor,
+			"in topic id",
+			topicId,
+			"tx decode error",
+			err,
+		)
+		return false
+	}
+
+	data.counts.incrementCancelStakeRemovalCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"cancelled stake removal as a reputer",
+		actor,
+		"in topic id",
+		topicId,
+	)
+	// make sure this reputer is still in the list of staked reputers
+	data.addReputerStaked(topicId, actor)
+	return true
+}
+
+// helper function that queries the chain for the amount of stake that a delegator has in a reputer
+func getDelegatorStakeFromChain(
+	m *testcommon.TestConfig,
+	delegator Actor,
+	reputer Actor,
+	topicId uint64,
+	failOnErr bool,
+	iteration int,
+) cosmossdk_io_math.Int {
+	ctx := context.Background()
+	qe := m.Client.QueryEmissions()
+	stakeResp, err := qe.GetStakeFromDelegatorInTopicInReputer(
+		ctx,
+		&emissionstypes.GetStakeFromDelegatorInTopicInReputerRequest{
+			DelegatorAddress: delegator.addr,
+			TopicId:          topicId,
+			ReputerAddress:   reputer.addr,
+		},
+	)
+	failIfOnErr(m.T, failOnErr, err)
+	iterLog(m.T, iteration, "Query chain stake from delegator", delegator, "upon reputer", reputer, "in topic id", topicId, "is", stakeResp.Amount)
+	return stakeResp.Amount
+}
+
+// pick a random percent (1/10, 1/3, 1/2, 6/7, or full amount) of the stake that a delegator has in a reputer
+func pickPercentOfStakeByDelegator(
+	m *testcommon.TestConfig,
+	topicId uint64,
+	delegator Actor,
+	reputer Actor,
+	data *SimulationData,
+	iteration int,
+) cosmossdk_io_math.Int {
+	del := Delegation{
+		TopicId:   topicId,
+		Delegator: delegator,
+		Reputer:   reputer,
+	}
+	_, exists := data.delegatorStakes.Get(del)
+	if !exists {
+		return cosmossdk_io_math.ZeroInt()
+	}
+	amount := getDelegatorStakeFromChain(m, delegator, reputer, topicId, data.failOnErr, iteration)
+
+	return pickPercentOf(m.Client.Rand, amount)
 }
 
 // stake as a delegator upon a reputer
@@ -248,8 +396,7 @@ func delegateStake(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -270,29 +417,12 @@ func delegateStake(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "delegation failed", delegator, "upon reputer", reputer, "in topic id", topicId, " in amount", amount.String())
-		return
-	}
-
-	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	registerWorkerResponse := &emissionstypes.DelegateStakeResponse{}
-	err = txResp.Decode(registerWorkerResponse)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.addDelegatorStake(topicId, delegator, reputer, *amount)
-		data.counts.incrementDelegateStakeCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"delegating stake",
+			"delegation failed",
 			delegator,
 			"upon reputer",
 			reputer,
@@ -300,10 +430,67 @@ func delegateStake(
 			topicId,
 			" in amount",
 			amount.String(),
+			"tx broadcast error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "delegation failed", delegator, "upon reputer", reputer, "in topic id", topicId, " in amount", amount.String())
+		return false
 	}
+
+	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"delegation failed",
+			delegator,
+			"upon reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			" in amount",
+			amount.String(),
+			"tx wait error",
+			err,
+		)
+		return false
+	}
+
+	registerWorkerResponse := &emissionstypes.DelegateStakeResponse{}
+	err = txResp.Decode(registerWorkerResponse)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"delegation failed",
+			delegator,
+			"upon reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			" in amount",
+			amount.String(),
+			"tx decode error",
+			err,
+		)
+		return false
+	}
+
+	data.addDelegatorDelegated(topicId, delegator, reputer)
+	data.counts.incrementDelegateStakeCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"delegating stake",
+		delegator,
+		"upon reputer",
+		"in topic id",
+		topicId,
+		" in amount",
+		amount.String(),
+	)
+	return true
 }
 
 // undelegate a percentage of the stake that the delegator has upon the reputer, either 1/10, 1/3, 1/2, 6/7, or the full amount
@@ -315,8 +502,7 @@ func undelegateStake(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -337,78 +523,85 @@ func undelegateStake(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "undelegation failed", delegator, "from reputer", reputer, "in topic id", topicId, " in amount", amount.String())
-		return
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"undelegation failed",
+			delegator,
+			"from reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			" in amount",
+			amount.String(),
+			"tx broadcast error",
+			err,
+		)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"undelegation failed",
+			delegator,
+			"from reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			" in amount",
+			amount.String(),
+			"tx wait error",
+			err,
+		)
+		return false
+	}
 
 	response := &emissionstypes.RemoveDelegateStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.markStakeRemovalDelegatorStake(topicId, delegator, reputer, amount)
-		data.counts.incrementUndelegateStakeCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"delegator ",
+			"undelegation failed",
 			delegator,
-			" unstaked from reputer ",
+			"from reputer",
 			reputer,
-			" in topic id ",
+			"in topic id",
 			topicId,
-			" in amount ",
+			" in amount",
 			amount.String(),
+			"tx decode error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "undelegation failed", delegator, "from reputer", reputer, "in topic id", topicId, " in amount", amount.String())
+		return false
 	}
-}
 
-// ask the chain if any stake removals exist
-func findFirstValidDelegateStakeRemovalFromChain(m *testcommon.TestConfig) (emissionstypes.DelegateStakeRemovalInfo, bool, error) {
-	ctx := context.Background()
-	blockHeightNow, err := m.Client.BlockHeight(ctx)
-	if err != nil {
-		return emissionstypes.DelegateStakeRemovalInfo{}, false, err
+	data.counts.incrementUndelegateStakeCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"delegator ",
+		delegator,
+		" unstaked from reputer ",
+		reputer,
+		" in topic id ",
+		topicId,
+		" in amount ",
+		amount.String(),
+	)
+	// if the delegator will have no stake left after this undelegation, remove them from the list of delegators
+	chainAmount := getDelegatorStakeFromChain(m, delegator, reputer, topicId, data.failOnErr, iteration)
+	if chainAmount.Equal(*amount) {
+		data.removeDelegatorDelegated(topicId, delegator, reputer)
 	}
-	moduleParams, err := m.Client.QueryEmissions().GetParams(ctx, &emissionstypes.GetParamsRequest{})
-	if err != nil {
-		return emissionstypes.DelegateStakeRemovalInfo{}, false, err
-	}
-	blockHeightEnd := blockHeightNow + moduleParams.Params.RemoveStakeDelayWindow
-	for i := blockHeightNow; i < blockHeightEnd; i++ {
-		query := &emissionstypes.GetDelegateStakeRemovalsUpUntilBlockRequest{
-			BlockHeight: i,
-		}
-		resp, err := m.Client.QueryEmissions().GetDelegateStakeRemovalsUpUntilBlock(ctx, query)
-		if err != nil || resp == nil {
-			continue
-		}
-		if len(resp.Removals) == 0 {
-			continue
-		}
-		if resp.Removals[0] == nil {
-			continue
-		}
-		return *resp.Removals[0], true, nil
-	}
-	return emissionstypes.DelegateStakeRemovalInfo{
-		BlockRemovalStarted:   0,
-		TopicId:               0,
-		BlockRemovalCompleted: 0,
-		Reputer:               "",
-		Delegator:             "",
-		Amount:                cosmossdk_io_math.Int{},
-	}, false, nil // no delegate stake removal was found
+	return true
 }
 
 func cancelDelegateStakeRemoval(
@@ -419,8 +612,7 @@ func cancelDelegateStakeRemoval(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -439,34 +631,72 @@ func cancelDelegateStakeRemoval(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "cancelling stake removal as a delegator failed delegator ", delegator, " reputer ", reputer, "in topic id", topicId)
-		return
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"cancelling stake removal as a delegator failed",
+			delegator,
+			"reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			"tx broadcast error",
+			err,
+		)
+		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"cancelling stake removal as a delegator failed",
+			delegator,
+			"reputer",
+			reputer,
+			"in topic id",
+			topicId,
+			"tx wait error",
+			err,
+		)
+		return false
+	}
 
 	response := &emissionstypes.CancelRemoveDelegateStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if !wasErr {
-		data.counts.incrementCancelDelegateStakeRemovalCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
-			"cancelled stake removal as a delegator",
+			"cancelling stake removal as a delegator failed",
 			delegator,
+			"reputer",
+			reputer,
 			"in topic id",
 			topicId,
+			"tx decode error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "cancelling stake removal as a delegator failed delegator ", delegator, " reputer", reputer, "in topic id", topicId)
+		return false
 	}
+
+	data.counts.incrementCancelDelegateStakeRemovalCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"cancelled stake removal as a delegator",
+		delegator,
+		"in topic id",
+		topicId,
+	)
+	// make sure this delegator is still in the list of delegators
+	data.addDelegatorDelegated(topicId, delegator, reputer)
+	return true
 }
 
 func collectDelegatorRewards(
@@ -477,8 +707,7 @@ func collectDelegatorRewards(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-) {
-	wasErr := false
+) (success bool) {
 	iterLog(
 		m.T,
 		iteration,
@@ -496,33 +725,62 @@ func collectDelegatorRewards(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-	if wasErr {
-		iterFailLog(m.T, iteration, "delegator ", delegator, " failed to collect rewards in topic id ", topicId)
-		return
-	}
-
-	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	response := &emissionstypes.RewardDelegateStakeResponse{}
-	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
-	wasErr = orErr(wasErr, err)
-
-	if !wasErr {
-		data.counts.incrementCollectDelegatorRewardsCount()
-		iterSuccessLog(
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
 			m.T,
 			iteration,
 			"delegator ",
 			delegator,
-			" collected rewards in topic id ",
+			" failed to collect rewards in topic id ",
 			topicId,
+			"tx broadcast error",
+			err,
 		)
-	} else {
-		iterFailLog(m.T, iteration, "delegator ", delegator, " failed to collect rewards in topic id ", topicId)
+		return false
 	}
+
+	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"delegator ",
+			delegator,
+			" failed to collect rewards in topic id ",
+			topicId,
+			"tx wait error",
+			err,
+		)
+		return false
+	}
+
+	response := &emissionstypes.RewardDelegateStakeResponse{}
+	err = txResp.Decode(response)
+	failIfOnErr(m.T, data.failOnErr, err)
+	if err != nil {
+		iterFailLog(
+			m.T,
+			iteration,
+			"delegator ",
+			delegator,
+			" failed to collect rewards in topic id ",
+			topicId,
+			"tx decode error",
+			err,
+		)
+		return false
+	}
+
+	data.counts.incrementCollectDelegatorRewardsCount()
+	iterSuccessLog(
+		m.T,
+		iteration,
+		"delegator ",
+		delegator,
+		" collected rewards in topic id ",
+		topicId,
+	)
+	return true
 }

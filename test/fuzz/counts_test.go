@@ -28,14 +28,14 @@ func (s StateTransitionCounts) String() string {
 		"\nregisterReputer: " + strconv.Itoa(s.registerReputer) + ", " +
 		"\nunregisterWorker: " + strconv.Itoa(s.unregisterWorker) + ", " +
 		"\nunregisterReputer: " + strconv.Itoa(s.unregisterReputer) + ", " +
-		"\nstakeAsReputer: " + strconv.Itoa(s.stakeAsReputer) +
-		"\ndelegateStake: " + strconv.Itoa(s.delegateStake) +
-		"\nunstakeAsReputer: " + strconv.Itoa(s.unstakeAsReputer) +
-		"\nundelegateStake: " + strconv.Itoa(s.undelegateStake) +
-		"\ncancelStakeRemoval: " + strconv.Itoa(s.cancelStakeRemoval) +
-		"\ncancelDelegateStakeRemoval: " + strconv.Itoa(s.cancelDelegateStakeRemoval) +
-		"\ncollectDelegatorRewards: " + strconv.Itoa(s.collectDelegatorRewards) +
-		"\ndoInferenceAndReputation: " + strconv.Itoa(s.doInferenceAndReputation) +
+		"\nstakeAsReputer: " + strconv.Itoa(s.stakeAsReputer) + ", " +
+		"\ndelegateStake: " + strconv.Itoa(s.delegateStake) + ", " +
+		"\nunstakeAsReputer: " + strconv.Itoa(s.unstakeAsReputer) + ", " +
+		"\nundelegateStake: " + strconv.Itoa(s.undelegateStake) + ", " +
+		"\ncancelStakeRemoval: " + strconv.Itoa(s.cancelStakeRemoval) + ", " +
+		"\ncancelDelegateStakeRemoval: " + strconv.Itoa(s.cancelDelegateStakeRemoval) + ", " +
+		"\ncollectDelegatorRewards: " + strconv.Itoa(s.collectDelegatorRewards) + ", " +
+		"\ndoInferenceAndReputation: " + strconv.Itoa(s.doInferenceAndReputation) + ", " +
 		"\n}"
 }
 

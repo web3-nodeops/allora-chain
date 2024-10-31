@@ -30,7 +30,7 @@ index f8ddae02..0a8cc692 100644
  )
  
 +var (
-+	_ module.HasInvariants = AppModule{}
++	_ module.HasInvariants = AppModule{} //nolint: exhaustruct
 +)
 +
 +// RegisterInvariants registers the emissions module invariants.

@@ -6,6 +6,7 @@ import (
 
 	cosmossdk_io_math "cosmossdk.io/math"
 	testcommon "github.com/allora-network/allora-chain/test/common"
+	fuzzcommon "github.com/allora-network/allora-chain/test/fuzz/common"
 )
 
 var UnusedActor Actor = Actor{} // nolint:exhaustruct
@@ -20,12 +21,15 @@ type StateTransitionFunc func(
 	topicId uint64,
 	data *SimulationData,
 	iteration int,
-)
+) bool
 
 // keep track of the name of the state transition as well as the function
 type StateTransition struct {
-	name string
-	f    StateTransitionFunc
+	name         string              // The name of this state transition
+	f            StateTransitionFunc // Which function to call
+	weight       uint8               // Interpreted as a percentage (0-100), all weights should sum to 100
+	follow       *StateTransition    // If there is a follow on state transition that can happen after this, else nil
+	followWeight uint8               // Interpreted as a percentage (0-100)
 }
 
 // The list of possible state transitions we can take are:
@@ -45,46 +49,129 @@ type StateTransition struct {
 // collect delegator rewards,
 // produce an inference (insert worker payloads),
 // produce reputation scores (insert reputer payloads)
-func allTransitions() ([]StateTransition, []StateTransition) {
-	// return additive state transitions first
-	// and subtractive state transitions second
+// NOTE: all weights must sum to 100
+func allTransitions(f *fuzzcommon.FuzzConfig) []StateTransition {
+	transitionWeights := f.TransitionWeights
+	transitionCreateTopic := StateTransition{
+		name: "createTopic", f: createTopic,
+		weight: transitionWeights.CreateTopic,
+		follow: nil, followWeight: 0,
+	}
+	transitionFundTopic := StateTransition{
+		name: "fundTopic", f: fundTopic,
+		weight: transitionWeights.FundTopic,
+		follow: nil, followWeight: 0,
+	}
+	transitionRegisterWorker := StateTransition{
+		name: "registerWorker", f: registerWorker,
+		weight: transitionWeights.RegisterWorker,
+		follow: nil, followWeight: 0,
+	}
+	transitionRegisterReputer := StateTransition{
+		name: "registerReputer", f: registerReputer,
+		weight: transitionWeights.RegisterReputer,
+		follow: nil, followWeight: 0,
+	}
+	transitionStakeAsReputer := StateTransition{
+		name: "stakeAsReputer", f: stakeAsReputer,
+		weight: transitionWeights.StakeAsReputer,
+		follow: nil, followWeight: 0,
+	}
+	transitionDelegateStake := StateTransition{
+		name: "delegateStake", f: delegateStake,
+		weight: transitionWeights.DelegateStake,
+		follow: nil, followWeight: 0,
+	}
+	transitionCollectDelegatorRewards := StateTransition{
+		name: "collectDelegatorRewards", f: collectDelegatorRewards,
+		weight: transitionWeights.CollectDelegatorRewards,
+		follow: nil, followWeight: 0,
+	}
+	transitionDoInferenceAndReputation := StateTransition{
+		name: "doInferenceAndReputation", f: doInferenceAndReputation,
+		weight: transitionWeights.DoInferenceAndReputation,
+		follow: nil, followWeight: 0,
+	}
+	transitionUnregisterWorker := StateTransition{
+		name: "unregisterWorker", f: unregisterWorker,
+		weight: transitionWeights.UnregisterWorker,
+		follow: nil, followWeight: 0,
+	}
+	transitionUnregisterReputer := StateTransition{
+		name: "unregisterReputer", f: unregisterReputer,
+		weight: transitionWeights.UnregisterReputer,
+		follow: nil, followWeight: 0,
+	}
+
+	//cancels come after the unstake/undelegate
+	transitionCancelStakeRemoval := StateTransition{
+		name: "cancelStakeRemoval", f: cancelStakeRemoval,
+		weight: transitionWeights.CancelStakeRemoval,
+		follow: nil, followWeight: 0,
+	}
+	transitionCancelDelegateStakeRemoval := StateTransition{
+		name: "cancelDelegateStakeRemoval", f: cancelDelegateStakeRemoval,
+		weight: transitionWeights.CancelDelegateStakeRemoval,
+		follow: nil, followWeight: 0,
+	}
+	transitionUnstakeAsReputer := StateTransition{
+		name: "unstakeAsReputer", f: unstakeAsReputer,
+		weight: transitionWeights.UnstakeAsReputer,
+		follow: &transitionCancelStakeRemoval, followWeight: 50,
+	}
+	transitionUndelegateStake := StateTransition{
+		name: "undelegateStake", f: undelegateStake,
+		weight: transitionWeights.UndelegateStake,
+		follow: &transitionCancelDelegateStakeRemoval, followWeight: 50,
+	}
+
 	return []StateTransition{
-			{"createTopic", createTopic},
-			{"fundTopic", fundTopic},
-			{"registerWorker", registerWorker},
-			{"registerReputer", registerReputer},
-			{"stakeAsReputer", stakeAsReputer},
-			{"delegateStake", delegateStake},
-			{"collectDelegatorRewards", collectDelegatorRewards},
-			{"doInferenceAndReputation", doInferenceAndReputation},
-		}, []StateTransition{
-			{"unregisterWorker", unregisterWorker},
-			{"unregisterReputer", unregisterReputer},
-			{"unstakeAsReputer", unstakeAsReputer},
-			{"undelegateStake", undelegateStake},
-			{"cancelStakeRemoval", cancelStakeRemoval},
-			{"cancelDelegateStakeRemoval", cancelDelegateStakeRemoval},
-		}
+		transitionCreateTopic,
+		transitionFundTopic,
+		transitionRegisterWorker,
+		transitionRegisterReputer,
+		transitionStakeAsReputer,
+		transitionDelegateStake,
+		transitionCollectDelegatorRewards,
+		transitionDoInferenceAndReputation,
+		transitionUnregisterWorker,
+		transitionUnregisterReputer,
+		transitionUnstakeAsReputer,
+		transitionUndelegateStake,
+		transitionCancelStakeRemoval,
+		transitionCancelDelegateStakeRemoval,
+	}
 }
 
 // weight transitions that add registrations or stake, more heavily than those that take it away
 // 70% of the time do additive stuff
 // 30% of the time do subtractive stuff
-func pickTransitionWithWeight(m *testcommon.TestConfig) StateTransition {
-	transitionsAdditive, transitionsSubtractive := allTransitions()
-	coinFlip := m.Client.Rand.Intn(10)
-	if coinFlip < 7 {
-		randIndex := m.Client.Rand.Intn(len(transitionsAdditive))
-		stateTransition := transitionsAdditive[randIndex]
-		return stateTransition
-	} else {
-		randIndex := m.Client.Rand.Intn(len(transitionsSubtractive))
-		stateTransition := transitionsSubtractive[randIndex]
-		return stateTransition
+func pickTransitionWithWeight(f *fuzzcommon.FuzzConfig) StateTransition {
+	transitions := allTransitions(f)
+	rand := f.TestConfig.Client.Rand.Intn(100)
+	threshold := uint8(0)
+	prevThreshold := uint8(0)
+	for _, transition := range transitions {
+		threshold += transition.weight
+		if rand >= int(prevThreshold) && rand < int(threshold) {
+			return transition
+		}
+		prevThreshold = threshold
 	}
+	panic(fmt.Sprintf("Weights must sum to 100 and rand should pick a value between 0 and 100: %d %d", rand, threshold))
 }
 
-// state machine dependencies for valid transitions
+// if it is possible to pick a follow on transition, pick it with this weight
+// if we decide not to pick it, return nil
+func pickFollowOnTransitionWithWeight(m *testcommon.TestConfig, currTransition StateTransition) *StateTransition {
+	rand := m.Client.Rand.Intn(100)
+	if rand < int(currTransition.followWeight) {
+		return currTransition.follow
+	}
+	return nil
+}
+
+// State machine dependencies for valid transitions
 //
 // fundTopic: CreateTopic
 // RegisterWorkerForTopic: CreateTopic
@@ -100,6 +187,9 @@ func pickTransitionWithWeight(m *testcommon.TestConfig) StateTransition {
 // collectDelegatorRewards: delegateStake, fundTopic, InsertWorkerPayload, InsertReputerPayload
 // InsertWorkerPayload: RegisterWorkerForTopic, FundTopic
 // InsertReputerPayload: RegisterReputerForTopic, InsertWorkerPayload
+//
+// Note: this function is not exhaustive, it only checks for the most obvious/low hanging fruit conditions
+// pickActorAndTopicIdForStateTransition will do further checks
 func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transition StateTransition) bool {
 	switch transition.name {
 	case "unregisterWorker":
@@ -117,13 +207,9 @@ func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transiti
 	case "collectDelegatorRewards":
 		return anyDelegatorsStaked(data) && anyReputersRegistered(data)
 	case "cancelStakeRemoval":
-		// too expensive to do this twice
-		// figure this out in picking step
-		return true
+		return anyReputersStaked(data)
 	case "cancelDelegateStakeRemoval":
-		// too expensive to do this twice
-		// figure this out in picking step
-		return true
+		return anyDelegatorsStaked(data)
 	case "doInferenceAndReputation":
 		ctx := context.Background()
 		blockHeightNow, err := m.Client.BlockHeight(ctx)
@@ -148,10 +234,22 @@ func canTransitionOccur(m *testcommon.TestConfig, data *SimulationData, transiti
 // is this specific combination of actors, amount, and topicId valid for the transition?
 func isValidTransition(m *testcommon.TestConfig, transition StateTransition, actor1 Actor, actor2 Actor, amount *cosmossdk_io_math.Int, topicId uint64, data *SimulationData, iteration int) bool {
 	switch transition.name {
+	case "registerWorker":
+		// can't register twice
+		if data.isWorkerRegisteredInTopic(topicId, actor1) {
+			return false
+		}
+		return true
+	case "registerReputer":
+		// can't register twice
+		if data.isReputerRegisteredInTopic(topicId, actor1) {
+			return false
+		}
+		return true
 	case "collectDelegatorRewards":
 		// if the reputer unregisters before the delegator withdraws stake, it can be invalid for a
 		// validator to collective rewards
-		if !data.isReputerRegistered(topicId, actor2) {
+		if !data.isReputerRegisteredInTopic(topicId, actor2) {
 			iterLog(m.T, iteration, "Transition not valid: ", transition.name, actor1, actor2, amount, topicId)
 			return false
 		}
@@ -196,11 +294,11 @@ func pickFullRandomValues(
 	data *SimulationData,
 ) (bool, Actor, Actor, *cosmossdk_io_math.Int, uint64) {
 	randomTopicId, err := pickRandomTopicId(m)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	randomActor1 := pickRandomActor(m, data)
 	randomActor2 := pickRandomActor(m, data)
 	amount, err := pickRandomBalanceLessThanHalf(m, randomActor1)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	return true, randomActor1, randomActor2, &amount, randomTopicId
 }
 
@@ -211,6 +309,7 @@ func pickActorAndTopicIdForStateTransition(
 	m *testcommon.TestConfig,
 	transition StateTransition,
 	data *SimulationData,
+	iteration int,
 ) (success bool, actor1 Actor, actor2 Actor, amount *cosmossdk_io_math.Int, topicId uint64) {
 	switch transition.name {
 	case "unregisterWorker":
@@ -231,7 +330,7 @@ func pickActorAndTopicIdForStateTransition(
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
 		amount, err := pickRandomBalanceLessThanHalf(m, reputer) // if err amount=zero which is a valid transition
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		return true, reputer, UnusedActor, &amount, topicId
 	case "delegateStake":
 		reputer, topicId, err := data.pickRandomRegisteredReputer()
@@ -240,21 +339,21 @@ func pickActorAndTopicIdForStateTransition(
 		}
 		delegator := pickRandomActorExcept(m, data, []Actor{reputer})
 		amount, err := pickRandomBalanceLessThanHalf(m, delegator)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		return true, delegator, reputer, &amount, topicId
 	case "unstakeAsReputer":
 		reputer, topicId, err := data.pickRandomStakedReputer()
 		if err != nil {
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
-		amount := data.pickPercentOfStakeByReputer(m.Client.Rand, topicId, reputer)
+		amount := pickPercentOfStakeByReputer(m, topicId, reputer, data, iteration)
 		return true, reputer, UnusedActor, &amount, topicId
 	case "undelegateStake":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
 		if err != nil {
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
-		amount := data.pickPercentOfStakeByDelegator(m.Client.Rand, topicId, delegator, reputer)
+		amount := pickPercentOfStakeByDelegator(m, topicId, delegator, reputer, data, iteration)
 		return true, delegator, reputer, &amount, topicId
 	case "collectDelegatorRewards":
 		delegator, reputer, topicId, err := data.pickRandomStakedDelegator()
@@ -262,30 +361,6 @@ func pickActorAndTopicIdForStateTransition(
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
 		return true, delegator, reputer, nil, topicId
-	case "cancelStakeRemoval":
-		stakeRemoval, found, err := findFirstValidStakeRemovalFromChain(m)
-		if err != nil || !found {
-			return false, UnusedActor, UnusedActor, nil, 0
-		}
-		reputer, found := data.getActorFromAddr(stakeRemoval.Reputer)
-		if !found {
-			return false, UnusedActor, UnusedActor, nil, 0
-		}
-		return true, reputer, UnusedActor, &stakeRemoval.Amount, stakeRemoval.TopicId
-	case "cancelDelegateStakeRemoval":
-		stakeRemoval, found, err := findFirstValidDelegateStakeRemovalFromChain(m)
-		if err != nil || !found {
-			return false, UnusedActor, UnusedActor, nil, 0
-		}
-		delegator, found := data.getActorFromAddr(stakeRemoval.Delegator)
-		if !found {
-			return false, UnusedActor, UnusedActor, nil, 0
-		}
-		reputer, found := data.getActorFromAddr(stakeRemoval.Reputer)
-		if !found {
-			return false, UnusedActor, UnusedActor, nil, 0
-		}
-		return true, delegator, reputer, &stakeRemoval.Amount, stakeRemoval.TopicId
 	case "doInferenceAndReputation":
 		ctx := context.Background()
 		blockHeightNow, err := m.Client.BlockHeight(ctx)
