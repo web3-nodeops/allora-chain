@@ -278,7 +278,7 @@ func startRegisterReputers(
 			iterationCount++
 			// stake reputer on the topic
 			bal, err := pickRandomBalanceLessThanHalf(m, reputer)
-			requireNoError(m.T, true, err)
+			failIfOnErr(m.T, true, err)
 			success = stakeAsReputer(m, reputer, UnusedActor, &bal, topicId, data, iterationCount)
 			require.True(m.T, success)
 			iterationCount++
@@ -319,7 +319,7 @@ func startDelegateDelegators(
 	for i, delegator := range startDelegators {
 		for _, topicId := range listTopics {
 			bal, err := pickRandomBalanceLessThanHalf(m, delegator)
-			requireNoError(m.T, true, err)
+			failIfOnErr(m.T, true, err)
 			success := delegateStake(m, delegator, startReputers[i], &bal, topicId, data, iterationCount)
 			require.True(m.T, success)
 			iterationCount++
@@ -339,7 +339,7 @@ func startFundTopics(
 	iterationCount := iterationCountStart
 	for _, topicId := range listTopics {
 		fundAmount, err := pickRandomBalanceLessThanHalf(m, faucet)
-		requireNoError(m.T, true, err)
+		failIfOnErr(m.T, true, err)
 		success := fundTopic(m, faucet, UnusedActor, &fundAmount, topicId, data, iterationCount)
 		require.True(m.T, success)
 		iterationCount++

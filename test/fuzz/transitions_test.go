@@ -294,11 +294,11 @@ func pickFullRandomValues(
 	data *SimulationData,
 ) (bool, Actor, Actor, *cosmossdk_io_math.Int, uint64) {
 	randomTopicId, err := pickRandomTopicId(m)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	randomActor1 := pickRandomActor(m, data)
 	randomActor2 := pickRandomActor(m, data)
 	amount, err := pickRandomBalanceLessThanHalf(m, randomActor1)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	return true, randomActor1, randomActor2, &amount, randomTopicId
 }
 
@@ -330,7 +330,7 @@ func pickActorAndTopicIdForStateTransition(
 			return false, UnusedActor, UnusedActor, nil, 0
 		}
 		amount, err := pickRandomBalanceLessThanHalf(m, reputer) // if err amount=zero which is a valid transition
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		return true, reputer, UnusedActor, &amount, topicId
 	case "delegateStake":
 		reputer, topicId, err := data.pickRandomRegisteredReputer()
@@ -339,7 +339,7 @@ func pickActorAndTopicIdForStateTransition(
 		}
 		delegator := pickRandomActorExcept(m, data, []Actor{reputer})
 		amount, err := pickRandomBalanceLessThanHalf(m, delegator)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		return true, delegator, reputer, &amount, topicId
 	case "unstakeAsReputer":
 		reputer, topicId, err := data.pickRandomStakedReputer()

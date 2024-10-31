@@ -23,7 +23,7 @@ func getReputerStakeFromChain(
 		ReputerAddress: actor.addr,
 		TopicId:        topicId,
 	})
-	requireNoError(m.T, failOnErr, err)
+	failIfOnErr(m.T, failOnErr, err)
 	iterLog(m.T, iteration, "Query chain stake from reputer in topic in self", actor, "in topic id", topicId, "is", stakeResp.Amount)
 	return stakeResp.Amount
 }
@@ -75,7 +75,7 @@ func stakeAsReputer(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -93,7 +93,7 @@ func stakeAsReputer(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -112,7 +112,7 @@ func stakeAsReputer(
 
 	response := &emissionstypes.AddStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -183,7 +183,7 @@ func unstakeAsReputer(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -201,7 +201,7 @@ func unstakeAsReputer(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -219,7 +219,7 @@ func unstakeAsReputer(
 	}
 	response := &emissionstypes.RemoveStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -277,7 +277,7 @@ func cancelStakeRemoval(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -293,7 +293,7 @@ func cancelStakeRemoval(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -309,7 +309,7 @@ func cancelStakeRemoval(
 	}
 	response := &emissionstypes.CancelRemoveStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -357,7 +357,7 @@ func getDelegatorStakeFromChain(
 			ReputerAddress:   reputer.addr,
 		},
 	)
-	requireNoError(m.T, failOnErr, err)
+	failIfOnErr(m.T, failOnErr, err)
 	iterLog(m.T, iteration, "Query chain stake from delegator", delegator, "upon reputer", reputer, "in topic id", topicId, "is", stakeResp.Amount)
 	return stakeResp.Amount
 }
@@ -417,7 +417,7 @@ func delegateStake(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -437,7 +437,7 @@ func delegateStake(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -458,7 +458,7 @@ func delegateStake(
 
 	registerWorkerResponse := &emissionstypes.DelegateStakeResponse{}
 	err = txResp.Decode(registerWorkerResponse)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -523,7 +523,7 @@ func undelegateStake(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -543,7 +543,7 @@ func undelegateStake(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -564,7 +564,7 @@ func undelegateStake(
 
 	response := &emissionstypes.RemoveDelegateStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -631,7 +631,7 @@ func cancelDelegateStakeRemoval(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -649,7 +649,7 @@ func cancelDelegateStakeRemoval(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -668,7 +668,7 @@ func cancelDelegateStakeRemoval(
 
 	response := &emissionstypes.CancelRemoveDelegateStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -725,7 +725,7 @@ func collectDelegatorRewards(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, delegator.acc, &msg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -741,7 +741,7 @@ func collectDelegatorRewards(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -758,7 +758,7 @@ func collectDelegatorRewards(
 
 	response := &emissionstypes.RewardDelegateStakeResponse{}
 	err = txResp.Decode(response)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,

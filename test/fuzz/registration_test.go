@@ -37,14 +37,14 @@ func registerWorker(
 		IsReputer: false,
 		TopicId:   topicId,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId, "tx broadcast error", err)
 		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, "failed to register ", actor, "as worker in topic id ", topicId, "tx wait error", err)
 		return false
@@ -52,7 +52,7 @@ func registerWorker(
 
 	registerWorkerResponse := &emissionstypes.RegisterResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(registerWorkerResponse)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if data.failOnErr {
 		require.True(m.T, registerWorkerResponse.Success)
 	}
@@ -84,7 +84,7 @@ func unregisterWorker(
 		TopicId:   topicId,
 		IsReputer: false,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -94,7 +94,7 @@ func unregisterWorker(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -105,7 +105,7 @@ func unregisterWorker(
 
 	removeRegistrationResponse := &emissionstypes.RemoveRegistrationResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(removeRegistrationResponse)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if data.failOnErr {
 		require.True(m.T, removeRegistrationResponse.Success)
 	}
@@ -141,7 +141,7 @@ func registerReputer(
 		IsReputer: true,
 		TopicId:   topicId,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -151,7 +151,7 @@ func registerReputer(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -162,7 +162,7 @@ func registerReputer(
 
 	registerWorkerResponse := &emissionstypes.RegisterResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(registerWorkerResponse)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if data.failOnErr {
 		require.True(m.T, registerWorkerResponse.Success)
 	}
@@ -197,7 +197,7 @@ func unregisterReputer(
 		TopicId:   topicId,
 		IsReputer: true,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -207,7 +207,7 @@ func unregisterReputer(
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -218,7 +218,7 @@ func unregisterReputer(
 
 	removeRegistrationResponseMsg := &emissionstypes.RemoveRegistrationResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(removeRegistrationResponseMsg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if data.failOnErr {
 		require.True(m.T, removeRegistrationResponseMsg.Success)
 	}

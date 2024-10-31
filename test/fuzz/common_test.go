@@ -32,7 +32,7 @@ func iterFailLog(t *testing.T, iteration int, a ...any) {
 }
 
 // wrapper around require.NoError to only error if noFail is false
-func requireNoError(t *testing.T, failOnErr bool, err error) {
+func failIfOnErr(t *testing.T, failOnErr bool, err error) {
 	t.Helper()
 	if failOnErr {
 		require.NoError(t, err)

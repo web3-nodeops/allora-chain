@@ -32,7 +32,7 @@ func doInferenceAndReputation(
 	resp, err := m.Client.QueryEmissions().GetTopic(ctx, &emissionstypes.GetTopicRequest{
 		TopicId: topicId,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -48,7 +48,7 @@ func doInferenceAndReputation(
 	iterLog(m.T, iteration, "Inference topic epoch last ended ", topic.EpochLastEnded, " epoch length ", topic.EpochLength)
 	workerNonce := topic.EpochLastEnded + topic.EpochLength
 	blockHeightNow, err := m.Client.BlockHeight(ctx)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -63,7 +63,7 @@ func doInferenceAndReputation(
 	if blockHeightNow < workerNonce+1 {
 		iterLog(m.T, iteration, "waiting for next epoch to start so we can produce inferences for the current epoch: ", workerNonce+1)
 		err = m.Client.WaitForBlockHeight(ctx, workerNonce+1)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		if err != nil {
 			iterFailLog(
 				m.T,
@@ -77,7 +77,7 @@ func doInferenceAndReputation(
 		}
 		// Update block height
 		blockHeightNow, err = m.Client.BlockHeight(ctx)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		if err != nil {
 			iterFailLog(
 				m.T,
@@ -106,7 +106,7 @@ func doInferenceAndReputation(
 	reputerWaitBlocks := blockHeightNow + topic.GroundTruthLag + 1
 	iterLog(m.T, iteration, "waiting for reputer ground truth block", reputerWaitBlocks)
 	err = m.Client.WaitForBlockHeight(ctx, reputerWaitBlocks)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -152,7 +152,7 @@ func findActiveTopicsAtThisBlock(
 	response, err := m.Client.QueryEmissions().GetActiveTopicsAtBlock(ctx, &emissionstypes.GetActiveTopicsAtBlockRequest{
 		BlockHeight: blockHeight,
 	})
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	return response.Topics
 }
 
@@ -250,7 +250,7 @@ func sendWorkerPayload(
 	}
 	// serialize workerMsg to json and print
 	LeaderAcc, err := m.Client.AccountRegistryGetByName(sender.name)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -263,7 +263,7 @@ func sendWorkerPayload(
 	}
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, LeaderAcc, workerMsg)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -275,7 +275,7 @@ func sendWorkerPayload(
 		return false
 	}
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(
 			m.T,
@@ -315,7 +315,7 @@ func createAndSendReputerPayloads(
 		}
 
 		txResp, err := m.Client.BroadcastTx(ctx, reputer.acc, lossesMsg)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		if err != nil {
 			iterFailLog(
 				m.T,
@@ -327,7 +327,7 @@ func createAndSendReputerPayloads(
 			return false
 		}
 		_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-		requireNoError(m.T, data.failOnErr, err)
+		failIfOnErr(m.T, data.failOnErr, err)
 		if err != nil {
 			iterFailLog(
 				m.T,

@@ -40,14 +40,14 @@ func createTopic(
 
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, createTopicRequest)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx broadcast error", err)
 		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx wait error", err)
 		return false
@@ -55,7 +55,7 @@ func createTopic(
 
 	createTopicResponse := &emissionstypes.CreateNewTopicResponse{} // nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(createTopicResponse)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, actor, "failed to create topic", "tx decode error", err)
 		return false
@@ -85,14 +85,14 @@ func fundTopic(
 
 	ctx := context.Background()
 	txResp, err := m.Client.BroadcastTx(ctx, actor.acc, fundTopicRequest)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, actor, "failed to fund topic", topicId, "tx broadcast error", err)
 		return false
 	}
 
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
-	requireNoError(m.T, data.failOnErr, err)
+	failIfOnErr(m.T, data.failOnErr, err)
 	if err != nil {
 		iterFailLog(m.T, iteration, actor, "failed to fund topic", topicId, "tx wait error", err)
 		return false
