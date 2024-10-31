@@ -5,6 +5,7 @@ The fuzz tests in this repo send random transactions to the chain in order to tr
 Example invocation:
 
 ```bash
+bash test/local_testnet_l1.sh
 FUZZ_TEST=TRUE go test -timeout 15m -run ^TestFuzzTestSuite$ -v ./test/fuzz
 ```
 
