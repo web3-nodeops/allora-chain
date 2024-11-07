@@ -13,245 +13,385 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-func EmitRewards(
-	ctx sdk.Context,
-	k keeper.Keeper,
-	blockHeight BlockHeight,
-	weights map[uint64]*alloraMath.Dec,
-	sumWeight alloraMath.Dec,
-	totalRevenue cosmosMath.Int,
-) error {
-	totalReward, err := k.GetTotalRewardToDistribute(ctx)
-	Logger(ctx).Debug(fmt.Sprintf("Reward to distribute this epoch: %s", totalReward.String()))
+type CalcTopicRewardsArgs struct {
+	Ctx                             sdk.Context
+	Weights                         map[uint64]*alloraMath.Dec // weights of all active topics in this block
+	SortedTopics                    []uint64                   // topics sorted by weight in descending order
+	SumTopicWeights                 alloraMath.Dec             // sum of all active topic weights
+	TotalAvailableInRewardsTreasury alloraMath.Dec             // Maximum amount of rewards available in treasury
+	EpochLengths                    map[uint64]int64           // epoch lengths for each topic
+	CurrentRewardsEmissionPerBlock  alloraMath.Dec             // Rewards emission per block
+}
+
+type GenerateRewardsDistributionByTopicParticipantArgs struct {
+	Ctx          sdk.Context
+	K            keeper.Keeper
+	TopicId      uint64
+	TopicReward  *alloraMath.Dec
+	BlockHeight  int64
+	ModuleParams types.Params
+}
+
+type GetDistributionAndPayoutRewardsToTopicActorsArgs struct {
+	Ctx              sdk.Context
+	K                keeper.Keeper
+	TopicId          uint64
+	TopicRewardNonce int64
+	TopicReward      *alloraMath.Dec
+	ModuleParams     types.Params
+}
+
+type EmitRewardsArgs struct {
+	Ctx          sdk.Context
+	K            keeper.Keeper
+	ModuleParams types.Params
+	BlockHeight  BlockHeight
+	Weights      map[uint64]*alloraMath.Dec
+	SumWeight    alloraMath.Dec
+	TotalRevenue cosmosMath.Int
+}
+
+func EmitRewards(args EmitRewardsArgs) error {
+	// Get current total treasury, to confirm it covers the rewards to give
+	totalRewardTreasury, err := args.K.GetTotalRewardToDistribute(args.Ctx)
+	Logger(args.Ctx).Debug(fmt.Sprintf("Max rewards to distribute this epoch: %s", totalRewardTreasury.String()))
 	if err != nil {
-		return errors.Wrapf(err, "failed to get total reward to distribute")
+		return errors.Wrapf(err, "failed to get max rewards to distribute")
 	}
-	if totalReward.IsZero() {
-		Logger(ctx).Warn("The total scheduled rewards to distribute this epoch are zero!")
+	if totalRewardTreasury.IsZero() {
+		Logger(args.Ctx).Warn("The rewards treasury account has a total value of zero on this epoch!")
 		return nil
 	}
 
-	moduleParams, err := k.GetParams(ctx)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get module params")
-	}
-
-	rewardableTopics, err := k.GetRewardableTopics(ctx)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get rewardable topics")
-	}
 	// Sorted, active topics by weight descending. Still need skim top N to truly be the rewardable topics
-	sortedRewardableTopics := alloraMath.GetSortedElementsByDecWeightDesc(rewardableTopics, weights)
+	sortedRewardableTopics := alloraMath.GetSortedElementsByDecWeightDesc(args.Weights)
+	Logger(args.Ctx).Debug(fmt.Sprintf("Rewardable topics: %v", sortedRewardableTopics))
 
 	if len(sortedRewardableTopics) == 0 {
-		Logger(ctx).Warn("No rewardable topics found")
+		Logger(args.Ctx).Warn("No rewardable topics found")
 		return nil
 	}
 
 	// Top `N=MaxTopicsPerBlock` active topics of this block => the *actually* rewardable topics
-	if uint64(len(sortedRewardableTopics)) > moduleParams.MaxActiveTopicsPerBlock {
-		sortedRewardableTopics = sortedRewardableTopics[:moduleParams.MaxActiveTopicsPerBlock]
+	if uint64(len(sortedRewardableTopics)) > args.ModuleParams.MaxActiveTopicsPerBlock {
+		sortedRewardableTopics = sortedRewardableTopics[:args.ModuleParams.MaxActiveTopicsPerBlock]
 	}
 
-	// Get total weight of rewardable topics
-	sumWeightOfRewardableTopics := alloraMath.ZeroDec()
+	// Get the global total sum of previous topic weights
+	totalSumPreviousTopicWeights, err := args.K.GetTotalSumPreviousTopicWeights(args.Ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get total sum of previous topic weights")
+	}
+	if totalSumPreviousTopicWeights.IsZero() {
+		return errors.Wrapf(types.ErrInvalidReward, "No total weights set, no rewards")
+	}
+	// Get epoch lengths for sorted rewardable topics
+	epochLengths := make(map[uint64]int64)
 	for _, topicId := range sortedRewardableTopics {
-		sumWeightOfRewardableTopics, err = sumWeightOfRewardableTopics.Add(*weights[topicId])
+		topic, err := args.K.GetTopic(args.Ctx, topicId)
 		if err != nil {
-			return errors.Wrapf(err, "failed to add weight of top topics")
+			return errors.Wrapf(err, "failed to get epoch length for topic %d", topicId)
 		}
+		epochLengths[topicId] = topic.EpochLength
 	}
 
+	// Get current block emission, to be extrapolated to be used in rewards calculation
+	currentBlockEmission, err := args.K.GetRewardCurrentBlockEmission(args.Ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get current block emission")
+	}
+	Logger(args.Ctx).Debug(fmt.Sprintf("Current block emission: %s", currentBlockEmission.String()))
+
+	currentBlockEmissionDec, err := alloraMath.NewDecFromSdkInt(currentBlockEmission)
+	if err != nil {
+		return errors.Wrapf(err, "failed to convert current block emission to decimal")
+	}
 	// Revenue (above) is what was earned by topics in this timestep. Rewards are what are actually paid to topics => participants
 	// The reward and revenue calculations are coupled here to minimize excessive compute
-	topicRewards, err := CalcTopicRewards(ctx, k, weights, sortedRewardableTopics, sumWeightOfRewardableTopics, totalReward)
+	calcTopicRewardsArgs := CalcTopicRewardsArgs{
+		Ctx:                             args.Ctx,
+		Weights:                         args.Weights,
+		SortedTopics:                    sortedRewardableTopics,
+		SumTopicWeights:                 totalSumPreviousTopicWeights,
+		TotalAvailableInRewardsTreasury: totalRewardTreasury,
+		EpochLengths:                    epochLengths,
+		CurrentRewardsEmissionPerBlock:  currentBlockEmissionDec,
+	}
+	topicRewards, err := CalcTopicRewards(calcTopicRewardsArgs)
 	if err != nil {
 		return errors.Wrapf(err, "failed to calculate topic rewards")
 	}
+	Logger(args.Ctx).Debug(fmt.Sprintf("Topic rewards: %v", topicRewards))
 
-	// Calculate then pay out topic rewards to topic participants
-	totalRewardToStakedReputers := alloraMath.ZeroDec() // This is used to communicate with the mint module
+	// Initialize totalRewardToStakedReputers
+	totalRewardToStakedReputers := alloraMath.ZeroDec()
+
+	// Process rewards for each topic, pruning at the end of epoch
 	for _, topicId := range sortedRewardableTopics {
-		topicReward := topicRewards[topicId]
-		if topicReward == nil {
-			Logger(ctx).Warn(fmt.Sprintf("Topic %d has no reward, skipping", topicId))
+		topicRewardNonce, err := args.K.GetTopicRewardNonce(args.Ctx, topicId)
+		if err != nil || topicRewardNonce == 0 {
+			Logger(args.Ctx).Info(fmt.Sprintf("Topic %d has no valid reward nonce, skipping", topicId))
 			continue
 		}
-		// Get topic reward nonce/block height
-		topicRewardNonce, err := k.GetTopicRewardNonce(ctx, topicId)
-		// If the topic has no reward nonce, skip it
-		if err != nil || topicRewardNonce == 0 {
+		// Defer pruning records after rewards payout
+		defer func(topicId uint64, topicRewardNonce int64) {
+			if err := pruneRecordsAfterRewards(args.Ctx, args.K, args.ModuleParams.MinEpochLengthRecordLimit, topicId, topicRewardNonce); err != nil {
+				Logger(args.Ctx).Error(fmt.Sprintf("Failed to prune records after rewards for Topic %d, nonce: %d, err: %s", topicId, topicRewardNonce, err.Error()))
+			}
+		}(topicId, topicRewardNonce)
+
+		topicReward := topicRewards[topicId]
+		rewardInTopicToReputers, err := getDistributionAndPayoutRewardsToTopicActors(GetDistributionAndPayoutRewardsToTopicActorsArgs{
+			Ctx:              args.Ctx,
+			K:                args.K,
+			TopicId:          topicId,
+			TopicRewardNonce: topicRewardNonce,
+			TopicReward:      topicReward,
+			ModuleParams:     args.ModuleParams,
+		})
+		if err != nil {
+			Logger(args.Ctx).Error(fmt.Sprintf("Failed to process rewards for topic %d: %s", topicId, err.Error()))
 			continue
 		}
 
-		// Distribute rewards between topic participants
-		totalRewardsDistribution, rewardInTopicToReputers, err := GenerateRewardsDistributionByTopicParticipant(ctx, k, topicId, topicReward, topicRewardNonce, moduleParams)
-		if err != nil {
-			topicRewardString := "nil"
-			Logger(ctx).Warn(
-				fmt.Sprintf(
-					"Failed to Generate Rewards for Topic, Skipping:\nTopic Id %d\nTopic Reward Amount %s\nError:\n%s\n\n",
-					topicId,
-					topicRewardString,
-					err.Error(),
-				),
-			)
-			continue
-		}
+		// Add rewardInTopicToReputers to totalRewardToStakedReputers
 		totalRewardToStakedReputers, err = totalRewardToStakedReputers.Add(rewardInTopicToReputers)
 		if err != nil {
 			return errors.Wrapf(
 				err,
-				"Error finding sum of rewards to Reputers:\n%s\n%s",
+				"Error finding sum of rewards to Reputers: totalReward: %s , rewardInTopic: %s",
 				totalRewardToStakedReputers.String(),
 				rewardInTopicToReputers.String(),
 			)
 		}
-
-		// Pay out rewards to topic participants
-		payoutErrors := payoutRewards(ctx, k, totalRewardsDistribution)
-		if len(payoutErrors) > 0 {
-			for _, err := range payoutErrors {
-				Logger(ctx).Warn(
-					fmt.Sprintf(
-						"Failed to pay out rewards to participant in Topic:\nTopic Id %d\nTopic Reward Amount %s\nError:\n%s\n\n",
-						topicId,
-						topicReward.String(),
-						err.Error(),
-					),
-				)
-			}
-			continue
-		}
-
-		// Prune records after rewards have been paid out
-		err = pruneRecordsAfterRewards(ctx, k, moduleParams.MinEpochLengthRecordLimit, topicId, topicRewardNonce)
-		if err != nil {
-			Logger(ctx).Warn(
-				fmt.Sprintf(
-					"Failed to prune records after rewards for Topic, Skipping:\nTopic Id %d\nTopic Reward Amount %s\nError:\n%s\n\n",
-					topicId,
-					topicReward.String(),
-					err.Error(),
-				),
-			)
-			continue
-		}
-
-		err = k.RemoveRewardableTopic(ctx, topicId)
-		if err != nil {
-			Logger(ctx).Warn(
-				fmt.Sprintf(
-					"Failed to remove rewardable topic:\nTopic Id %d\nError:\n%s\n\n",
-					topicId,
-					err.Error(),
-				),
-			)
-			continue
-		}
 	}
-	Logger(ctx).Debug(
+
+	// Log and handle the final totalRewardToStakedReputers
+	Logger(args.Ctx).Debug(
 		fmt.Sprintf("Paid out %s to staked reputers over %d topics",
 			totalRewardToStakedReputers.String(),
 			len(topicRewards)))
-	if !totalReward.IsZero() && uint64(blockHeight)%moduleParams.BlocksPerMonth == 0 {
-		// set the previous percentage reward to staked reputers
-		// for the mint module to be able to control the inflation rate to that actor
-		percentageToStakedReputers, err := totalRewardToStakedReputers.Quo(totalReward)
+
+	if !totalRewardTreasury.IsZero() && uint64(args.BlockHeight)%args.ModuleParams.BlocksPerMonth == 0 {
+		percentageToStakedReputers, err := totalRewardToStakedReputers.Quo(totalRewardTreasury)
 		if err != nil {
 			return errors.Wrapf(err, "failed to calculate percentage to staked reputers")
 		}
-		err = k.SetPreviousPercentageRewardToStakedReputers(ctx, percentageToStakedReputers)
+		err = args.K.SetPreviousPercentageRewardToStakedReputers(args.Ctx, percentageToStakedReputers)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set previous percentage reward to staked reputers")
 		}
 	}
 
+	// Emit reward of each topic
+	types.EmitNewTopicRewardSetEvent(args.Ctx, topicRewards)
 	return nil
 }
 
-func CalcTopicRewards(
-	ctx sdk.Context,
-	k keeper.Keeper,
-	weights map[uint64]*alloraMath.Dec,
-	sortedTopics []uint64,
-	sumWeight alloraMath.Dec,
-	totalReward alloraMath.Dec,
-) (
-	map[uint64]*alloraMath.Dec,
-	error,
+// This function distributes and pays out rewards to topic actors based on their participation.
+// It returns the total reward distributed to reputers
+func getDistributionAndPayoutRewardsToTopicActors(args GetDistributionAndPayoutRewardsToTopicActorsArgs) (alloraMath.Dec, error) {
+	Logger(args.Ctx).Debug(fmt.Sprintf("Generating rewards distribution for topic: %d, topicRewardNonce: %d, topicReward: %s", args.TopicId, args.TopicRewardNonce, args.TopicReward))
+
+	// Get the distribution of rewards across actor types and participants in this topic
+	totalRewardsDistribution, rewardInTopicToActors, err := GenerateRewardsDistributionByTopicParticipant(GenerateRewardsDistributionByTopicParticipantArgs{
+		Ctx:          args.Ctx,
+		K:            args.K,
+		TopicId:      args.TopicId,
+		TopicReward:  args.TopicReward,
+		BlockHeight:  args.TopicRewardNonce,
+		ModuleParams: args.ModuleParams,
+	})
+	if err != nil {
+		return alloraMath.ZeroDec(), errors.Wrapf(err, "Failed to Generate Rewards for Topic %d", args.TopicId)
+	}
+
+	// Pay out rewards to topic participants
+	payoutErrors := payoutRewards(args.Ctx, args.K, totalRewardsDistribution)
+	if len(payoutErrors) > 0 {
+		for _, payoutErr := range payoutErrors {
+			Logger(args.Ctx).Warn(fmt.Sprintf("Failed to pay out rewards to participant in Topic %d: %s", args.TopicId, payoutErr.Error()))
+		}
+		return alloraMath.ZeroDec(), nil // continue to next topic
+	}
+
+	// Return rewardInTopicToReputers for summation in the main function
+	return rewardInTopicToActors, nil
+}
+
+// Calculates the rewards for each topic.
+//
+// Calculates rewards per-block based on their weights vs all active topics.
+// Rewards are then calculated per epoch, so topic's epochLength is used to calculate epoch rewards.
+// Uses the current total amount rewardable in treasury as the max reward available to check against.
+// If rewards treasury does not cover the computed rewards for the topics, the distribution is recalculated
+// by distributing the rewards treasury fairly among all topics based on their weight and epoch length.
+// Assumes SumTopicWeights to be nonzero
+func CalcTopicRewards(args CalcTopicRewardsArgs) (
+	topicRewards map[uint64]*alloraMath.Dec,
+	err error,
 ) {
-	topicRewards := make(map[TopicId]*alloraMath.Dec)
-	for _, topicId := range sortedTopics {
-		topicRewardFraction, err := GetTopicRewardFraction(weights[topicId], sumWeight)
-		if err != nil {
-			return nil, errors.Wrapf(err, "topic reward fraction error")
+	// General case calculation
+	topicRewards, totalTopicRewardsSum, err := calculateRewardsForCurrentTopics(args)
+	if err != nil {
+		return nil, errors.Wrapf(err, "calcTopicRewards: calculate rewards for current topics error")
+	}
+	if totalTopicRewardsSum.Gt(args.TotalAvailableInRewardsTreasury) {
+		// Note this will happen when the treasury is not enough to cover the rewards for all topics
+		// This will happen very rarely (cases where rewards emission changes dramatically), so optimization is done for the main case.
+		Logger(args.Ctx).Warn("Treasury lower than calculated rewards. Distributing treasury equally among current topics.")
+		if len(args.SortedTopics) == 1 {
+			// most likely case, only one topic - so it gets the entire treasury directly
+			topicId := args.SortedTopics[0]
+			topicRewards[topicId] = &args.TotalAvailableInRewardsTreasury
+		} else {
+			topicRewards, err = calculateRewardsFromWholeTreasury(args)
+			if err != nil {
+				return nil, errors.Wrapf(err, "calcTopicRewards: distribute rewards treasury to current topics error")
+			}
 		}
-		topicReward, err := GetTopicReward(topicRewardFraction, totalReward)
-		if err != nil {
-			return nil, errors.Wrapf(err, "topic reward error")
-		}
-		topicRewards[topicId] = &topicReward
 	}
 	return topicRewards, nil
 }
 
+// Calculates rewards per-block based on their weights vs all active topics.
+// The notion emission per-block is used to calculate the rewards per-block.
+// Rewards are then calculated per epoch, so topic's epochLength is used to calculate epoch rewards.
+func calculateRewardsForCurrentTopics(args CalcTopicRewardsArgs) (topicRewards map[uint64]*alloraMath.Dec, totalTopicRewardsSum alloraMath.Dec, err error) {
+	totalTopicRewardsSum = alloraMath.ZeroDec()
+	topicRewards = make(map[uint64]*alloraMath.Dec)
+	for _, topicId := range args.SortedTopics {
+		topicWeight := args.Weights[topicId]
+		topicRewardFraction, err := GetTopicRewardFraction(topicWeight, args.SumTopicWeights)
+		if err != nil {
+			return nil, alloraMath.Dec{}, errors.Wrapf(err, "topic reward fraction error")
+		}
+		if alloraMath.ZeroDec().Equal(topicRewardFraction) {
+			args.Ctx.Logger().Warn(fmt.Sprintf("Skipping rewards for topic: %d, zero weights", topicId))
+			continue
+		}
+		topicRewardPerBlock, err := GetTopicReward(topicRewardFraction, args.CurrentRewardsEmissionPerBlock)
+		if err != nil {
+			return nil, alloraMath.Dec{}, errors.Wrapf(err, "topic reward error")
+		}
+		epochLength := args.EpochLengths[topicId]
+		if epochLength <= 0 {
+			return nil, alloraMath.Dec{}, errors.Wrapf(types.ErrInvalidLengthTopic, "epoch length is nil or zero for topic %d", topicId)
+		}
+		epochLengthDec := alloraMath.NewDecFromInt64(epochLength)
+		topicRewardPerEpoch, err := topicRewardPerBlock.Mul(epochLengthDec)
+		if err != nil {
+			return nil, alloraMath.Dec{}, errors.Wrapf(err, "calcTopicRewards:topic reward multiplication with epoch length fraction error")
+		}
+		topicRewards[topicId] = &topicRewardPerEpoch
+		totalTopicRewardsSum, err = totalTopicRewardsSum.Add(topicRewardPerEpoch)
+		if err != nil {
+			return nil, alloraMath.Dec{}, errors.Wrapf(err, "calcTopicRewards: total topic rewards sum error")
+		}
+	}
+	return topicRewards, totalTopicRewardsSum, nil
+}
+
+// Distributes the whole rewards treasury across the topics based on their factor
+func calculateRewardsFromWholeTreasury(args CalcTopicRewardsArgs) (topicRewards map[uint64]*alloraMath.Dec, err error) {
+	// Factors of each topic, relative to the total factor of topics. Not using weight because already used in this context.
+	topicFactors := make(map[uint64]*alloraMath.Dec)
+	totalTopicFactors := alloraMath.ZeroDec()
+	// Rewards awarded to each topic
+	topicRewards = make(map[uint64]*alloraMath.Dec)
+
+	// Calculate topic factors
+	for _, topicId := range args.SortedTopics {
+		topicWeight := args.Weights[topicId]
+		topicEpochLength := args.EpochLengths[topicId]
+		topicFactor, err := topicWeight.Mul(alloraMath.NewDecFromInt64(topicEpochLength))
+		if err != nil {
+			return nil, errors.Wrapf(err, "distributeRewardsTreasuryToCurrentTopics: topic factor error")
+		}
+		topicFactors[topicId] = &topicFactor
+		totalTopicFactors, err = totalTopicFactors.Add(topicFactor)
+		if err != nil {
+			return nil, errors.Wrapf(err, "distributeRewardsTreasuryToCurrentTopics: total topic factors sum error")
+		}
+	}
+
+	// Distribute treasury across topics based on their factor
+	for _, topicId := range args.SortedTopics {
+		topicRewardPerEpoch, err := args.TotalAvailableInRewardsTreasury.Mul(*topicFactors[topicId])
+		if err != nil {
+			return nil, errors.Wrapf(err, "distributeRewardsTreasuryToCurrentTopics: topic reward per epoch error")
+		}
+		topicRewardPerEpoch, err = topicRewardPerEpoch.Quo(totalTopicFactors)
+		if err != nil {
+			return nil, errors.Wrapf(err, "distributeRewardsTreasuryToCurrentTopics: topic reward per epoch error")
+		}
+		topicRewards[topicId] = &topicRewardPerEpoch
+	}
+
+	return topicRewards, nil
+}
+
+// Calculates distribution of rewards to topic participants.
+// Retrieves the reputer and network loss bundles.
+// It then calculates and sets the reputer, inferer, and forecaster scores,
+// then returning reward distributions
 func GenerateRewardsDistributionByTopicParticipant(
-	ctx sdk.Context,
-	k keeper.Keeper,
-	topicId uint64,
-	topicReward *alloraMath.Dec,
-	blockHeight int64,
-	moduleParams types.Params,
-) (
+	args GenerateRewardsDistributionByTopicParticipantArgs) (
 	totalRewardsDistribution []types.TaskReward,
 	taskReputerReward alloraMath.Dec,
 	err error,
 ) {
-	if topicReward == nil {
+	if args.TopicReward == nil {
 		return nil, alloraMath.Dec{}, types.ErrInvalidReward
 	}
-	bundles, err := k.GetReputerLossBundlesAtBlock(ctx, topicId, blockHeight)
+	args.Ctx.Logger().Debug(fmt.Sprintf("Generating rewards distribution for topic: %d, block: %d, topicReward: %s", args.TopicId, args.BlockHeight, args.TopicReward.String()))
+	bundles, err := args.K.GetReputerLossBundlesAtBlock(args.Ctx, args.TopicId, args.BlockHeight)
 	if err != nil {
-		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get network loss bundle at block %d", blockHeight)
+		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get reputer loss bundle at block %d", args.BlockHeight)
+	}
+	if bundles != nil && len(bundles.ReputerValueBundles) == 0 {
+		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(types.ErrInvalidReward, "empty reputer loss bundles")
 	}
 
-	lossBundles, err := k.GetNetworkLossBundleAtBlock(ctx, topicId, blockHeight)
+	lossBundles, err := args.K.GetNetworkLossBundleAtBlock(args.Ctx, args.TopicId, args.BlockHeight)
 	if err != nil {
-		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get network loss bundle at block %d", blockHeight)
+		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get network loss bundle at block %d", args.BlockHeight)
 	}
 
 	// Calculate and Set the reputer scores
-	reputerScores, err := GenerateReputerScores(ctx, k, topicId, blockHeight, *bundles)
+	reputerScores, err := GenerateReputerScores(args.Ctx, args.K, args.TopicId, args.BlockHeight, *bundles)
 	if err != nil {
 		return nil, alloraMath.Dec{}, err
 	}
+	if len(reputerScores) == 0 {
+		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(types.ErrInvalidReward, "empty reputer scores")
+	}
 
 	// Calculate and Set the worker scores for their inference work
-	infererScores, err := GenerateInferenceScores(ctx, k, topicId, blockHeight, *lossBundles)
+	infererScores, err := GenerateInferenceScores(args.Ctx, args.K, args.TopicId, args.BlockHeight, *lossBundles)
 	if err != nil {
 		return nil, alloraMath.Dec{}, err
 	}
 
 	// Calculate and Set the worker scores for their forecast work
-	forecasterScores, err := GenerateForecastScores(ctx, k, topicId, blockHeight, *lossBundles)
+	forecasterScores, err := GenerateForecastScores(args.Ctx, args.K, args.TopicId, args.BlockHeight, *lossBundles)
 	if err != nil {
 		return nil, alloraMath.Dec{}, err
 	}
 
 	// Get reputer participants' addresses and reward fractions to be used in the reward round for topic
-	reputers, reputersRewardFractions, err := GetReputersRewardFractions(ctx, k, topicId, moduleParams.PRewardReputer, reputerScores)
+	reputers, reputersRewardFractions, err := GetReputersRewardFractions(args.Ctx, args.K, args.TopicId, args.ModuleParams.PRewardReputer, reputerScores)
 	if err != nil {
 		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get reputer reward round data")
 	}
 
 	// Get reputer task entropy
 	reputerEntropy, err := GetReputerTaskEntropy(
-		ctx,
-		k,
-		topicId,
-		moduleParams.TaskRewardAlpha,
-		moduleParams.BetaEntropy,
+		args.Ctx,
+		args.K,
+		args.TopicId,
+		args.ModuleParams.TaskRewardAlpha,
+		args.ModuleParams.BetaEntropy,
 		reputers,
 		reputersRewardFractions,
 	)
@@ -261,12 +401,12 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get inferer reward fractions
 	inferers, inferersRewardFractions, err := GetInferenceTaskRewardFractions(
-		ctx,
-		k,
-		topicId,
-		blockHeight,
-		moduleParams.PRewardInference,
-		moduleParams.CRewardInference,
+		args.Ctx,
+		args.K,
+		args.TopicId,
+		args.BlockHeight,
+		args.ModuleParams.PRewardInference,
+		args.ModuleParams.CRewardInference,
 		infererScores,
 	)
 	if err != nil {
@@ -275,11 +415,11 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get inference entropy
 	inferenceEntropy, err := GetInferenceTaskEntropy(
-		ctx,
-		k,
-		topicId,
-		moduleParams.TaskRewardAlpha,
-		moduleParams.BetaEntropy,
+		args.Ctx,
+		args.K,
+		args.TopicId,
+		args.ModuleParams.TaskRewardAlpha,
+		args.ModuleParams.BetaEntropy,
 		inferers,
 		inferersRewardFractions,
 	)
@@ -289,12 +429,12 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get forecaster reward fractions
 	forecasters, forecastersRewardFractions, err := GetForecastingTaskRewardFractions(
-		ctx,
-		k,
-		topicId,
-		blockHeight,
-		moduleParams.PRewardForecast,
-		moduleParams.CRewardForecast,
+		args.Ctx,
+		args.K,
+		args.TopicId,
+		args.BlockHeight,
+		args.ModuleParams.PRewardForecast,
+		args.ModuleParams.CRewardForecast,
 		forecasterScores,
 	)
 	if err != nil {
@@ -305,11 +445,11 @@ func GenerateRewardsDistributionByTopicParticipant(
 	if len(forecasters) > 0 && len(inferers) > 1 {
 		// Get forecasting entropy
 		forecastingEntropy, err = GetForecastTaskEntropy(
-			ctx,
-			k,
-			topicId,
-			moduleParams.TaskRewardAlpha,
-			moduleParams.BetaEntropy,
+			args.Ctx,
+			args.K,
+			args.TopicId,
+			args.ModuleParams.TaskRewardAlpha,
+			args.ModuleParams.BetaEntropy,
 			forecasters,
 			forecastersRewardFractions,
 		)
@@ -326,34 +466,35 @@ func GenerateRewardsDistributionByTopicParticipant(
 		inferenceEntropy,
 		forecastingEntropy,
 		reputerEntropy,
-		topicReward,
+		args.TopicReward,
 	)
 	if err != nil {
 		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get reward for reputer task in topic")
 	}
 
 	// Get previous forecaster score ratio for topic
-	previousForecasterScoreRatio, err := k.GetPreviousForecasterScoreRatio(ctx, topicId)
+	previousForecasterScoreRatio, err := args.K.GetPreviousForecasterScoreRatio(args.Ctx, args.TopicId)
 	if err != nil {
 		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get previous forecast score ratio")
 	}
 
 	// Get chi (Forecasting Utility) and gamma (Normalization Factor)
-	chi, gamma, updatedForecasterScoreRatio, err := GetChiAndGamma(
+	chi, gamma, updatedForecasterScoreRatio, forecastingTaskUtilityScore, err := GetChiAndGamma(
 		lossBundles.NaiveValue,
 		lossBundles.CombinedValue,
 		inferenceEntropy,
 		forecastingEntropy,
 		infererScores,
 		previousForecasterScoreRatio,
-		moduleParams.TaskRewardAlpha,
+		args.ModuleParams.TaskRewardAlpha,
 	)
 	if err != nil {
 		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to get chi and gamma")
 	}
+	types.EmitNewForecastTaskUtilityScoreSetEvent(args.Ctx, args.TopicId, forecastingTaskUtilityScore)
 
 	// Set updated forecaster score ratio
-	err = k.SetPreviousForecasterScoreRatio(ctx, topicId, updatedForecasterScoreRatio)
+	err = args.K.SetPreviousForecasterScoreRatio(args.Ctx, args.TopicId, updatedForecasterScoreRatio)
 	if err != nil {
 		return []types.TaskReward{}, alloraMath.Dec{}, errors.Wrapf(err, "failed to set previous forecast score ratio")
 	}
@@ -363,7 +504,7 @@ func GenerateRewardsDistributionByTopicParticipant(
 		inferenceEntropy,
 		forecastingEntropy,
 		reputerEntropy,
-		topicReward,
+		args.TopicReward,
 		chi,
 		gamma,
 	)
@@ -376,7 +517,7 @@ func GenerateRewardsDistributionByTopicParticipant(
 		inferenceEntropy,
 		forecastingEntropy,
 		reputerEntropy,
-		topicReward,
+		args.TopicReward,
 		chi,
 		gamma,
 	)
@@ -388,9 +529,9 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get Distribution of Rewards per Reputer
 	reputerRewards, err := GetRewardPerReputer(
-		ctx,
-		k,
-		topicId,
+		args.Ctx,
+		args.K,
+		args.TopicId,
 		taskReputerReward,
 		reputers,
 		reputersRewardFractions,
@@ -402,7 +543,7 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get Distribution of Rewards per Worker - Inference Task
 	inferenceRewards, err := GetRewardPerWorker(
-		topicId,
+		args.TopicId,
 		types.WorkerInferenceRewardType,
 		taskInferenceReward,
 		inferers,
@@ -415,7 +556,7 @@ func GenerateRewardsDistributionByTopicParticipant(
 
 	// Get Distribution of Rewards per Worker - Forecast Task
 	forecastRewards, err := GetRewardPerWorker(
-		topicId,
+		args.TopicId,
 		types.WorkerForecastRewardType,
 		taskForecastingReward,
 		forecasters,
@@ -509,8 +650,20 @@ func payoutRewards(
 
 			if reward.Type == types.WorkerInferenceRewardType {
 				infererRewards = append(infererRewards, reward)
+
+				err := k.IncrementCountInfererInclusionsInTopic(ctx, reward.TopicId, reward.Address)
+				if err != nil {
+					ret = append(ret, errors.Wrapf(err, "failed to increment count inferer inclusions in topic"))
+					continue
+				}
 			} else if reward.Type == types.WorkerForecastRewardType {
 				forecasterRewards = append(forecasterRewards, reward)
+
+				err := k.IncrementCountForecasterInclusionsInTopic(ctx, reward.TopicId, reward.Address)
+				if err != nil {
+					ret = append(ret, errors.Wrapf(err, "failed to increment count forecaster inclusions in topic"))
+					continue
+				}
 			}
 		}
 	}
@@ -561,7 +714,9 @@ func pruneRecordsAfterRewards(
 	// This is to leave the necessary data for the remaining
 	// unfulfilled nonces to be fulfilled
 	oldestNonce -= minEpochLengthRecordLimit * topic.EpochLength
-
+	if oldestNonce < 0 {
+		oldestNonce = 0
+	}
 	// Prune old records after rewards have been paid out
 	err = k.PruneRecordsAfterRewards(ctx, topicId, oldestNonce)
 	if err != nil {

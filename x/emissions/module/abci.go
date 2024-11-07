@@ -41,16 +41,10 @@ func EndBlocker(ctx context.Context, am AppModule) error {
 	if err != nil {
 		return errors.Wrapf(err, "Weights error")
 	}
+
 	sdkCtx.Logger().Debug(fmt.Sprintf("ABCI EndBlocker %d: Total Revenue: %v, Sum Weight: %v", blockHeight, totalRevenue, sumWeight))
 
-	// REWARDS (will internally filter any non-RewardReady topics)
-	err = rewards.EmitRewards(sdkCtx, am.keeper, blockHeight, weights, sumWeight, totalRevenue)
-	if err != nil {
-		sdkCtx.Logger().Error("Error calculating global emission per topic: ", err)
-		return errors.Wrapf(err, "Rewards error")
-	}
-
-	err = rewards.PickChurnableActiveTopics(
+	err = rewards.UpdateNoncesOfActiveTopics(
 		sdkCtx,
 		am.keeper,
 		blockHeight,
@@ -61,6 +55,20 @@ func EndBlocker(ctx context.Context, am AppModule) error {
 		return err
 	}
 
+	// REWARDS (will internally filter any non-RewardReady topics)
+	err = rewards.EmitRewards(rewards.EmitRewardsArgs{
+		Ctx:          sdkCtx,
+		K:            am.keeper,
+		ModuleParams: moduleParams,
+		BlockHeight:  blockHeight,
+		Weights:      weights,
+		SumWeight:    sumWeight,
+		TotalRevenue: totalRevenue,
+	})
+	if err != nil {
+		sdkCtx.Logger().Error("Error calculating global emission per topic: ", err)
+		return errors.Wrapf(err, "Rewards error")
+	}
 	// Close any open windows due this blockHeight
 	workerWindowsToClose := am.keeper.GetWorkerWindowTopicIds(sdkCtx, blockHeight)
 	if len(workerWindowsToClose.TopicIds) > 0 {
@@ -75,9 +83,19 @@ func EndBlocker(ctx context.Context, am AppModule) error {
 				// No nonces to fulfill
 				continue
 			} else {
+				topic, err := am.keeper.GetTopic(sdkCtx, topicId)
+				if err != nil {
+					sdkCtx.Logger().Warn(fmt.Sprintf("Error getting topic: %s", err.Error()))
+					continue
+				}
 				for _, nonce := range nonces.Nonces {
+					// Skip rest of logic if the worker submission window is still open (i.e. don't close the window yet)
+					if am.keeper.BlockWithinWorkerSubmissionWindowOfNonce(topic, *nonce, blockHeight) {
+						sdkCtx.Logger().Debug(fmt.Sprintf("ABCI EndBlocker %d: Worker window still open for topic: %d, nonce: %v", blockHeight, topicId, nonce))
+						continue
+					}
 					sdkCtx.Logger().Debug(fmt.Sprintf("ABCI EndBlocker %d: Closing Worker window for topic: %d, nonce: %v", blockHeight, topicId, nonce))
-					err := allorautils.CloseWorkerNonce(&am.keeper, sdkCtx, topicId, *nonce)
+					err := allorautils.CloseWorkerNonce(&am.keeper, sdkCtx, topic, *nonce)
 					if err != nil {
 						sdkCtx.Logger().Info(fmt.Sprintf("Error closing worker nonce, proactively fulfilling: %s", err.Error()))
 						// Proactively close the nonce
@@ -91,7 +109,7 @@ func EndBlocker(ctx context.Context, am AppModule) error {
 				}
 			}
 		}
-		err = am.keeper.DeleteWorkerWindowBlockheight(sdkCtx, blockHeight)
+		err = am.keeper.DeleteWorkerWindowBlockHeight(sdkCtx, blockHeight)
 		if err != nil {
 			sdkCtx.Logger().Warn(fmt.Sprintf("Error deleting worker window blockheight: %s", err.Error()))
 		}

@@ -23,7 +23,7 @@ func UpdateReputerNonce(ctx sdk.Context, k keeper.Keeper, topic types.Topic, blo
 		if block >= closingReputerNonceMinBlockHeight {
 			ctx.Logger().Debug(fmt.Sprintf("ABCI EndBlocker: Closing reputer nonce for topic: %v nonce: %v, min: %d. \n",
 				topic.Id, nonce, closingReputerNonceMinBlockHeight))
-			err = allorautils.CloseReputerNonce(&k, ctx, topic.Id, *nonce.ReputerNonce)
+			err = allorautils.CloseReputerNonce(&k, ctx, topic, *nonce.ReputerNonce)
 			if err != nil {
 				ctx.Logger().Warn(fmt.Sprintf("Error closing reputer nonce: %s", err.Error()))
 				// Proactively close the nonce to avoid
@@ -59,7 +59,7 @@ func PruneReputerAndWorkerNonces(ctx sdk.Context, k keeper.Keeper, topic types.T
 		// Reputer nonces need to check worker nonces from one epoch before
 		workerPruningBlock := reputerPruningBlock - topic.EpochLength
 		if workerPruningBlock > 0 {
-			ctx.Logger().Debug("Pruning worker nonces before block: ", workerPruningBlock, " for topic: ", topic.Id)
+			ctx.Logger().Debug(fmt.Sprintf("Pruning worker nonces before block: %d  for topic: %d", workerPruningBlock, topic.Id))
 			// Prune old worker nonces previous to current block to avoid inserting inferences after its time has passed
 			err = k.PruneWorkerNonces(ctx, topic.Id, workerPruningBlock)
 			if err != nil {

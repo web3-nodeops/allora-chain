@@ -11,10 +11,10 @@ func (s *QueryServerTestSuite) TestGetWorkerNodeInfo() {
 	ctx := s.ctx
 	keeper := s.emissionsKeeper
 	queryServer := s.queryServer
-	worker := "sampleWorkerAddress"
+	worker := s.addrsStr[0]
 
 	expectedNode := types.OffchainNode{
-		Owner:       "worker-owner-sample",
+		Owner:       s.addrsStr[1],
 		NodeAddress: worker,
 	}
 
@@ -22,7 +22,7 @@ func (s *QueryServerTestSuite) TestGetWorkerNodeInfo() {
 	err := keeper.InsertWorker(ctx, topicId, worker, expectedNode)
 	s.Require().NoError(err, "InsertWorker should not produce an error")
 
-	req := &types.QueryWorkerNodeInfoRequest{
+	req := &types.GetWorkerNodeInfoRequest{
 		Address: worker,
 	}
 
@@ -33,7 +33,7 @@ func (s *QueryServerTestSuite) TestGetWorkerNodeInfo() {
 	s.Require().NotNil(response.NodeInfo, "The response NodeInfo should not be nil")
 	s.Require().Equal(&expectedNode, response.NodeInfo, "The retrieved node information should match the expected node information")
 
-	invalidReq := &types.QueryWorkerNodeInfoRequest{
+	invalidReq := &types.GetWorkerNodeInfoRequest{
 		Address: "nonexistent-key",
 	}
 	_, err = queryServer.GetWorkerNodeInfo(ctx, invalidReq)
@@ -45,9 +45,9 @@ func (s *QueryServerTestSuite) TestGetReputerNodeInfo() {
 	keeper := s.emissionsKeeper
 	queryServer := s.queryServer
 
-	reputer := "sampleReputerAddress"
+	reputer := s.addrsStr[1]
 	expectedReputer := types.OffchainNode{
-		NodeAddress: "cosmosNodeAddress",
+		NodeAddress: s.addrsStr[0],
 		Owner:       reputer,
 	}
 
@@ -55,7 +55,7 @@ func (s *QueryServerTestSuite) TestGetReputerNodeInfo() {
 	err := keeper.InsertReputer(ctx, topicId, reputer, expectedReputer)
 	s.Require().NoError(err, "InsertReputer should not produce an error")
 
-	req := &types.QueryReputerNodeInfoRequest{
+	req := &types.GetReputerNodeInfoRequest{
 		Address: reputer,
 	}
 
@@ -66,7 +66,7 @@ func (s *QueryServerTestSuite) TestGetReputerNodeInfo() {
 	s.Require().NotNil(response.NodeInfo, "The response NodeInfo should not be nil")
 	s.Require().Equal(&expectedReputer, response.NodeInfo, "The retrieved node information should match the expected node information")
 
-	invalidReq := &types.QueryReputerNodeInfoRequest{
+	invalidReq := &types.GetReputerNodeInfoRequest{
 		Address: "nonExistentKey123",
 	}
 	_, err = queryServer.GetReputerNodeInfo(ctx, invalidReq)
@@ -81,7 +81,7 @@ func (s *QueryServerTestSuite) TestUnregisteredWorkerIsUnregisteredInTopicId() {
 	notRegisteredWorkerAddr := "allo12gjf2mrtva0p33gqtvsxp37zgglmdgpwaq22m2"
 
 	// Test: Worker is not registered under the topic
-	notRegisteredRequest := &types.QueryIsWorkerRegisteredInTopicIdRequest{
+	notRegisteredRequest := &types.IsWorkerRegisteredInTopicIdRequest{
 		TopicId: uint64(1),
 		Address: notRegisteredWorkerAddr,
 	}
@@ -96,11 +96,10 @@ func (s *QueryServerTestSuite) TestRegisteredWorkerIsRegisteredInTopicId() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	workerAddr := sdk.AccAddress(PKS[0].Address())
+	workerAddr := s.addrs[1]
 	workerAddrString := workerAddr.String()
-	creatorAddress := sdk.AccAddress(PKS[1].Address()).String()
 	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress}
+	topic1 := s.mockTopic()
 
 	// Topic register
 	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
@@ -108,7 +107,7 @@ func (s *QueryServerTestSuite) TestRegisteredWorkerIsRegisteredInTopicId() {
 	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
 	require.NoError(err, "ActivateTopic should not return an error")
 	// Worker register
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    workerAddrString,
 		TopicId:   topicId,
 		IsReputer: false,
@@ -128,19 +127,19 @@ func (s *QueryServerTestSuite) TestRegisteredWorkerIsRegisteredInTopicId() {
 	)
 	require.NoError(err, "SendCoinsFromModuleToAccount should not return an error")
 
-	queryReq := &types.QueryIsWorkerRegisteredInTopicIdRequest{
+	queryReq := &types.IsWorkerRegisteredInTopicIdRequest{
 		Address: workerAddrString,
 		TopicId: topicId,
 	}
 	queryResp, err := s.queryServer.IsWorkerRegisteredInTopicId(ctx, queryReq)
-	require.NoError(err, "QueryIsWorkerRegisteredInTopicId should not return an error")
+	require.NoError(err, "IsWorkerRegisteredInTopicId should not return an error")
 	require.False(queryResp.IsRegistered, "Query response should confirm worker is registered")
 
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering worker should not return an error")
 
 	queryResp, err = s.queryServer.IsWorkerRegisteredInTopicId(ctx, queryReq)
-	require.NoError(err, "QueryIsWorkerRegisteredInTopicId should not return an error")
+	require.NoError(err, "IsWorkerRegisteredInTopicId should not return an error")
 	require.True(queryResp.IsRegistered, "Query response should confirm worker is registered")
 }
 
@@ -149,10 +148,9 @@ func (s *QueryServerTestSuite) TestRegisteredReputerIsRegisteredInTopicId() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
-	creatorAddress := sdk.AccAddress(PKS[1].Address())
+	reputerAddr := s.addrs[2]
 	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress.String()}
+	topic1 := s.mockTopic()
 
 	// Topic register
 	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
@@ -160,7 +158,7 @@ func (s *QueryServerTestSuite) TestRegisteredReputerIsRegisteredInTopicId() {
 	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
 	require.NoError(err, "ActivateTopic should not return an error")
 	// Register reputer
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
 		TopicId:   topicId,
 		IsReputer: true,
@@ -175,18 +173,18 @@ func (s *QueryServerTestSuite) TestRegisteredReputerIsRegisteredInTopicId() {
 	err = s.bankKeeper.SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, reputerAddr, mintAmount)
 	require.NoError(err, "SendCoinsFromModuleToAccount should not return an error")
 
-	queryReq := &types.QueryIsReputerRegisteredInTopicIdRequest{
+	queryReq := &types.IsReputerRegisteredInTopicIdRequest{
 		Address: reputerAddr.String(),
 		TopicId: topicId,
 	}
 	queryResp, err := s.queryServer.IsReputerRegisteredInTopicId(ctx, queryReq)
-	require.NoError(err, "QueryIsReputerRegisteredInTopicId should not return an error")
+	require.NoError(err, "IsReputerRegisteredInTopicId should not return an error")
 	require.False(queryResp.IsRegistered, "Query response should confirm reputer is registered")
 
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering reputer should not return an error")
 
 	queryResp, err = s.queryServer.IsReputerRegisteredInTopicId(ctx, queryReq)
-	require.NoError(err, "QueryIsReputerRegisteredInTopicId should not return an error")
+	require.NoError(err, "IsReputerRegisteredInTopicId should not return an error")
 	require.True(queryResp.IsRegistered, "Query response should confirm reputer is registered")
 }

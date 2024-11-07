@@ -15,4 +15,30 @@
   "go.lintFlags": [
         "-c", "${workspaceFolder}/.golangci.yml", "--fast"
     ],
+    "cSpell.words": [
+      "actorutils",
+      "authtypes",
+      "autocli",
+      "Bech",
+      "cosmossdk",
+      "cosmostestutil",
+      "Delegators",
+      "emissionstestutil",
+      "errorsmod",
+      "gomock",
+      "Inferer",
+      "inferers",
+      "moduletestutil",
+      "msgserver",
+      "oldtypes",
+      "protobuf",
+      "quantile",
+      "Quantiles",
+      "reputers",
+      "sdkerrors",
+      "storetypes",
+      "stretchr",
+      "testutil",
+      "Wrapf"
+    ],
 }

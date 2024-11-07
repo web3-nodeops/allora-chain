@@ -10,7 +10,7 @@ import (
 )
 
 func createNewTopic(s *RewardsTestSuite) uint64 {
-	newTopicMsg := &types.MsgCreateNewTopic{
+	newTopicMsg := &types.CreateNewTopicRequest{
 		Creator:                  s.addrs[5].String(),
 		Metadata:                 "test",
 		LossMethod:               "mse",
@@ -24,6 +24,7 @@ func createNewTopic(s *RewardsTestSuite) uint64 {
 		ActiveInfererQuantile:    alloraMath.MustNewDecFromString("0.2"),
 		ActiveForecasterQuantile: alloraMath.MustNewDecFromString("0.2"),
 		ActiveReputerQuantile:    alloraMath.MustNewDecFromString("0.2"),
+		AllowNegative:            false,
 	}
 	res, err := s.msgServer.CreateNewTopic(s.ctx, newTopicMsg)
 	s.Require().NoError(err)
@@ -212,16 +213,16 @@ func (s *RewardsTestSuite) TestGetWorkersRewardFractionsFromCsv() {
 	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
 	epoch4Get := epochGet[finalEpoch]
 
-	inferer0 := "inferer0"
-	inferer1 := "inferer1"
-	inferer2 := "inferer2"
-	inferer3 := "inferer3"
-	inferer4 := "inferer4"
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
 	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-	forecaster0 := "forecaster0"
-	forecaster1 := "forecaster1"
-	forecaster2 := "forecaster2"
+	forecaster0 := s.addrsStr[5]
+	forecaster1 := s.addrsStr[6]
+	forecaster2 := s.addrsStr[7]
 	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
 
 	// Add scores from previous epochs
@@ -489,13 +490,13 @@ func (s *RewardsTestSuite) TestInferenceRewardsFromCsv() {
 	totalReward, err := testutil.GetTotalRewardForTopicInEpoch(epoch3Get)
 	s.Require().NoError(err)
 	infererScores := []types.Score{
-		{Score: epoch3Get("inferer_score_0")},
-		{Score: epoch3Get("inferer_score_1")},
-		{Score: epoch3Get("inferer_score_2")},
-		{Score: epoch3Get("inferer_score_3")},
-		{Score: epoch3Get("inferer_score_4")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[0], Score: epoch3Get("inferer_score_0")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[1], Score: epoch3Get("inferer_score_1")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[2], Score: epoch3Get("inferer_score_2")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[3], Score: epoch3Get("inferer_score_3")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[4], Score: epoch3Get("inferer_score_4")},
 	}
-	chi, gamma, _, err := rewards.GetChiAndGamma(
+	chi, gamma, _, _, err := rewards.GetChiAndGamma(
 		epoch3Get("network_naive_loss"),
 		epoch3Get("network_loss"),
 		epoch3Get("inferers_entropy"),
@@ -527,13 +528,13 @@ func (s *RewardsTestSuite) TestForecastRewardsFromCsv() {
 	totalReward, err := testutil.GetTotalRewardForTopicInEpoch(epoch3Get)
 	s.Require().NoError(err)
 	infererScores := []types.Score{
-		{Score: epoch3Get("inferer_score_0")},
-		{Score: epoch3Get("inferer_score_1")},
-		{Score: epoch3Get("inferer_score_2")},
-		{Score: epoch3Get("inferer_score_3")},
-		{Score: epoch3Get("inferer_score_4")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[0], Score: epoch3Get("inferer_score_0")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[1], Score: epoch3Get("inferer_score_1")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[2], Score: epoch3Get("inferer_score_2")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[3], Score: epoch3Get("inferer_score_3")},
+		{TopicId: 1, BlockHeight: 300, Address: s.addrsStr[4], Score: epoch3Get("inferer_score_4")},
 	}
-	chi, gamma, _, err := rewards.GetChiAndGamma(
+	chi, gamma, _, _, err := rewards.GetChiAndGamma(
 		epoch3Get("network_naive_loss"),
 		epoch3Get("network_loss"),
 		epoch3Get("inferers_entropy"),
@@ -629,12 +630,18 @@ func mockNetworkLosses(s *RewardsTestSuite, topicId uint64, block int64) (types.
 	}
 
 	networkLosses := types.ValueBundle{
-		TopicId:                topicId,
-		CombinedValue:          alloraMath.MustNewDecFromString("0.013481256018186383"),
-		NaiveValue:             alloraMath.MustNewDecFromString("0.01344474872292"),
-		OneOutInfererValues:    oneOutInfererLosses,
-		OneOutForecasterValues: oneOutForecasterLosses,
-		OneInForecasterValues:  oneInNaiveLosses,
+		TopicId:                       topicId,
+		ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: block}},
+		Reputer:                       s.addrsStr[9],
+		ExtraData:                     nil,
+		CombinedValue:                 alloraMath.MustNewDecFromString("0.013481256018186383"),
+		InfererValues:                 nil,
+		ForecasterValues:              nil,
+		NaiveValue:                    alloraMath.MustNewDecFromString("0.01344474872292"),
+		OneOutInfererValues:           oneOutInfererLosses,
+		OneOutForecasterValues:        oneOutForecasterLosses,
+		OneInForecasterValues:         oneInNaiveLosses,
+		OneOutInfererForecasterValues: nil,
 	}
 
 	// Persist network losses
@@ -683,12 +690,18 @@ func mockSimpleNetworkLosses(
 	}
 
 	networkLosses := types.ValueBundle{
-		TopicId:                topicId,
-		CombinedValue:          alloraMath.MustNewDecFromString("0.05"),
-		NaiveValue:             alloraMath.MustNewDecFromString("0.05"),
-		OneOutInfererValues:    genericLossesWithheld,
-		OneOutForecasterValues: genericLossesWithheld,
-		OneInForecasterValues:  genericLosses,
+		TopicId:                       topicId,
+		ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: block}},
+		Reputer:                       s.addrsStr[9],
+		ExtraData:                     nil,
+		CombinedValue:                 alloraMath.MustNewDecFromString("0.05"),
+		InfererValues:                 nil,
+		ForecasterValues:              nil,
+		NaiveValue:                    alloraMath.MustNewDecFromString("0.05"),
+		OneOutInfererValues:           genericLossesWithheld,
+		OneOutForecasterValues:        genericLossesWithheld,
+		OneInForecasterValues:         genericLosses,
+		OneOutInfererForecasterValues: nil,
 	}
 
 	err := s.emissionsKeeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, block, networkLosses)

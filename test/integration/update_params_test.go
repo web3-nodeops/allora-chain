@@ -11,7 +11,7 @@ import (
 
 func checkIfAdmin(m testCommon.TestConfig, address string) bool {
 	ctx := context.Background()
-	paramsReq := &emissionstypes.QueryIsWhitelistAdminRequest{
+	paramsReq := &emissionstypes.IsWhitelistAdminRequest{
 		Address: address,
 	}
 	p, err := m.Client.QueryEmissions().IsWhitelistAdmin(
@@ -37,13 +37,54 @@ func UpdateParamsChecks(m testCommon.TestConfig) {
 	// Should succeed for Alice because she's a whitelist admin
 	newEpsilonReputer := alloraMath.NewDecFinite(1, 99)
 	input := []alloraMath.Dec{newEpsilonReputer}
-	updateParamRequest := &emissionstypes.MsgUpdateParams{
+	updateParamRequest := &emissionstypes.UpdateParamsRequest{
 		Sender: m.AliceAddr,
 		Params: &emissionstypes.OptionalParams{
 			EpsilonReputer: input,
 			// These are set for subsequent tests
 			MaxTopReputersToReward: []uint64{24},
 			MinEpochLength:         []int64{1},
+			// don't update the following fields
+			Version:                             nil,
+			MaxSerializedMsgLength:              nil,
+			MinTopicWeight:                      nil,
+			RequiredMinimumStake:                nil,
+			RemoveStakeDelayWindow:              nil,
+			BetaEntropy:                         nil,
+			LearningRate:                        nil,
+			MaxGradientThreshold:                nil,
+			MinStakeFraction:                    nil,
+			MaxUnfulfilledWorkerRequests:        nil,
+			MaxUnfulfilledReputerRequests:       nil,
+			TopicRewardStakeImportance:          nil,
+			TopicRewardFeeRevenueImportance:     nil,
+			TopicRewardAlpha:                    nil,
+			TaskRewardAlpha:                     nil,
+			ValidatorsVsAlloraPercentReward:     nil,
+			MaxSamplesToScaleScores:             nil,
+			MaxTopInferersToReward:              nil,
+			MaxTopForecastersToReward:           nil,
+			CreateTopicFee:                      nil,
+			GradientDescentMaxIters:             nil,
+			RegistrationFee:                     nil,
+			DefaultPageLimit:                    nil,
+			MaxPageLimit:                        nil,
+			MinEpochLengthRecordLimit:           nil,
+			BlocksPerMonth:                      nil,
+			PRewardInference:                    nil,
+			PRewardForecast:                     nil,
+			PRewardReputer:                      nil,
+			CRewardInference:                    nil,
+			CRewardForecast:                     nil,
+			CNorm:                               nil,
+			HalfMaxProcessStakeRemovalsEndBlock: nil,
+			DataSendingFee:                      nil,
+			EpsilonSafeDiv:                      nil,
+			MaxElementsPerForecast:              nil,
+			MaxActiveTopicsPerBlock:             nil,
+			MaxStringLength:                     nil,
+			InitialRegretQuantile:               nil,
+			PNormSafeDiv:                        nil,
 		},
 	}
 	txResp, err := m.Client.BroadcastTx(ctx, m.AliceAcc, updateParamRequest)
@@ -53,10 +94,53 @@ func UpdateParamsChecks(m testCommon.TestConfig) {
 
 	// Should fail for Bob because he's not a whitelist admin
 	input = []alloraMath.Dec{alloraMath.NewDecFinite(1, 2)}
-	updateParamRequest = &emissionstypes.MsgUpdateParams{
+	updateParamRequest = &emissionstypes.UpdateParamsRequest{
 		Sender: m.BobAddr,
 		Params: &emissionstypes.OptionalParams{
 			EpsilonReputer: input,
+			// don't update the following fields
+			Version:                             nil,
+			MaxTopReputersToReward:              nil,
+			MinEpochLength:                      nil,
+			MaxSerializedMsgLength:              nil,
+			MinTopicWeight:                      nil,
+			RequiredMinimumStake:                nil,
+			RemoveStakeDelayWindow:              nil,
+			BetaEntropy:                         nil,
+			LearningRate:                        nil,
+			MaxGradientThreshold:                nil,
+			MinStakeFraction:                    nil,
+			MaxUnfulfilledWorkerRequests:        nil,
+			MaxUnfulfilledReputerRequests:       nil,
+			TopicRewardStakeImportance:          nil,
+			TopicRewardFeeRevenueImportance:     nil,
+			TopicRewardAlpha:                    nil,
+			TaskRewardAlpha:                     nil,
+			ValidatorsVsAlloraPercentReward:     nil,
+			MaxSamplesToScaleScores:             nil,
+			MaxTopInferersToReward:              nil,
+			MaxTopForecastersToReward:           nil,
+			CreateTopicFee:                      nil,
+			GradientDescentMaxIters:             nil,
+			RegistrationFee:                     nil,
+			DefaultPageLimit:                    nil,
+			MaxPageLimit:                        nil,
+			MinEpochLengthRecordLimit:           nil,
+			BlocksPerMonth:                      nil,
+			PRewardInference:                    nil,
+			PRewardForecast:                     nil,
+			PRewardReputer:                      nil,
+			CRewardInference:                    nil,
+			CRewardForecast:                     nil,
+			CNorm:                               nil,
+			HalfMaxProcessStakeRemovalsEndBlock: nil,
+			DataSendingFee:                      nil,
+			EpsilonSafeDiv:                      nil,
+			MaxElementsPerForecast:              nil,
+			MaxActiveTopicsPerBlock:             nil,
+			MaxStringLength:                     nil,
+			InitialRegretQuantile:               nil,
+			PNormSafeDiv:                        nil,
 		},
 	}
 	_, err = m.Client.BroadcastTx(ctx, m.BobAcc, updateParamRequest)
@@ -70,10 +154,53 @@ func UpdateParamsChecks(m testCommon.TestConfig) {
 
 	// Set the epsilon reputer back to the original value
 	input = []alloraMath.Dec{oldEpsilonReputer}
-	updateParamRequest = &emissionstypes.MsgUpdateParams{
+	updateParamRequest = &emissionstypes.UpdateParamsRequest{
 		Sender: m.AliceAddr,
 		Params: &emissionstypes.OptionalParams{
 			EpsilonReputer: input,
+			// don't update the following fields
+			Version:                             nil,
+			MaxTopReputersToReward:              nil,
+			MinEpochLength:                      nil,
+			MaxSerializedMsgLength:              nil,
+			MinTopicWeight:                      nil,
+			RequiredMinimumStake:                nil,
+			RemoveStakeDelayWindow:              nil,
+			BetaEntropy:                         nil,
+			LearningRate:                        nil,
+			MaxGradientThreshold:                nil,
+			MinStakeFraction:                    nil,
+			MaxUnfulfilledWorkerRequests:        nil,
+			MaxUnfulfilledReputerRequests:       nil,
+			TopicRewardStakeImportance:          nil,
+			TopicRewardFeeRevenueImportance:     nil,
+			TopicRewardAlpha:                    nil,
+			TaskRewardAlpha:                     nil,
+			ValidatorsVsAlloraPercentReward:     nil,
+			MaxSamplesToScaleScores:             nil,
+			MaxTopInferersToReward:              nil,
+			MaxTopForecastersToReward:           nil,
+			CreateTopicFee:                      nil,
+			GradientDescentMaxIters:             nil,
+			RegistrationFee:                     nil,
+			DefaultPageLimit:                    nil,
+			MaxPageLimit:                        nil,
+			MinEpochLengthRecordLimit:           nil,
+			BlocksPerMonth:                      nil,
+			PRewardInference:                    nil,
+			PRewardForecast:                     nil,
+			PRewardReputer:                      nil,
+			CRewardInference:                    nil,
+			CRewardForecast:                     nil,
+			CNorm:                               nil,
+			HalfMaxProcessStakeRemovalsEndBlock: nil,
+			DataSendingFee:                      nil,
+			EpsilonSafeDiv:                      nil,
+			MaxElementsPerForecast:              nil,
+			MaxActiveTopicsPerBlock:             nil,
+			MaxStringLength:                     nil,
+			InitialRegretQuantile:               nil,
+			PNormSafeDiv:                        nil,
 		},
 	}
 	txResp, err = m.Client.BroadcastTx(ctx, m.AliceAcc, updateParamRequest)

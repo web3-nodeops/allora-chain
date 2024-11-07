@@ -6,7 +6,7 @@ import (
 	"time"
 
 	upgradetypes "cosmossdk.io/x/upgrade/types"
-	"github.com/allora-network/allora-chain/app/upgrades/v0_4_0"
+	"github.com/allora-network/allora-chain/app/upgrades/v0_6_0"
 	testCommon "github.com/allora-network/allora-chain/test/common"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -18,7 +18,9 @@ import (
 // get the amount of coins required to deposit for a proposal
 func getDepositRequired(m testCommon.TestConfig) sdktypes.Coin {
 	ctx := context.Background()
-	queryGovParamsResponse, err := m.Client.QueryGov().Params(ctx, &govtypesv1.QueryParamsRequest{})
+	queryGovParamsResponse, err := m.Client.QueryGov().Params(ctx, &govtypesv1.QueryParamsRequest{
+		ParamsType: "",
+	})
 	require.NoError(m.T, err)
 	return queryGovParamsResponse.Params.ExpeditedMinDeposit[0]
 }
@@ -39,6 +41,7 @@ func voteOnProposal(m testCommon.TestConfig, proposalId uint64) {
 			ProposalId: proposalId,
 			Voter:      validator.addr,
 			Option:     govtypesv1.OptionYes,
+			Metadata:   "",
 		}
 		txResp, err := m.Client.BroadcastTx(ctx, validator.acc, msgVote)
 		require.NoError(m.T, err)
@@ -51,10 +54,10 @@ func voteOnProposal(m testCommon.TestConfig, proposalId uint64) {
 	}
 }
 
-// propose an upgrade to the v0.4.0 software version
+// propose an upgrade to the v0.5.0 software version
 func proposeUpgrade(m testCommon.TestConfig) (proposalId uint64, proposalHeight int64) {
 	ctx := context.Background()
-	name := v0_4_0.UpgradeName
+	name := v0_6_0.UpgradeName
 	summary := "Upgrade to " + name + " software version"
 
 	currHeight, err := m.Client.BlockHeight(ctx)
@@ -64,9 +67,11 @@ func proposeUpgrade(m testCommon.TestConfig) (proposalId uint64, proposalHeight 
 	msgSoftwareUpgrade := &upgradetypes.MsgSoftwareUpgrade{
 		Authority: authtypes.NewModuleAddress("gov").String(),
 		Plan: upgradetypes.Plan{
-			Name:   name,
-			Height: proposalHeight,
-			Info:   "{}",
+			Name:                name,
+			Height:              proposalHeight,
+			Info:                "{}",
+			Time:                time.Time{},
+			UpgradedClientState: nil,
 		},
 	}
 	msgSubmitProposal := &govtypesv1.MsgSubmitProposal{
@@ -80,6 +85,7 @@ func proposeUpgrade(m testCommon.TestConfig) (proposalId uint64, proposalHeight 
 		InitialDeposit: sdktypes.NewCoins(
 			getDepositRequired(m),
 		),
+		Messages: nil,
 	}
 	err = msgSubmitProposal.SetMsgs([]sdktypes.Msg{msgSoftwareUpgrade})
 	require.NoError(m.T, err)
@@ -87,7 +93,7 @@ func proposeUpgrade(m testCommon.TestConfig) (proposalId uint64, proposalHeight 
 	require.NoError(m.T, err)
 	_, err = m.Client.WaitForTx(ctx, txResp.TxHash)
 	require.NoError(m.T, err)
-	submitProposalMsgResponse := &govtypesv1.MsgSubmitProposalResponse{}
+	submitProposalMsgResponse := &govtypesv1.MsgSubmitProposalResponse{} //nolint:exhaustruct // the fields are populated by decode
 	err = txResp.Decode(submitProposalMsgResponse)
 	require.NoError(m.T, err)
 	require.NotNil(m.T, submitProposalMsgResponse.ProposalId)
@@ -142,8 +148,20 @@ func waitForUpgrade(m testCommon.TestConfig, proposalHeight int64) {
 	time.Sleep(timeToSleep)
 }
 
+func getAppliedVersionHeight(m testCommon.TestConfig, version string) int64 {
+	ctx := context.Background()
+
+	queryAppliedPlanRequest := &upgradetypes.QueryAppliedPlanRequest{
+		Name: version,
+	}
+	queryAppliedPlanResponse, err := m.Client.QueryUpgrade().AppliedPlan(ctx, queryAppliedPlanRequest)
+	require.NoError(m.T, err)
+	require.NotNil(m.T, queryAppliedPlanResponse)
+	return queryAppliedPlanResponse.Height
+}
+
 func UpgradeChecks(m testCommon.TestConfig) {
-	versionName := v0_4_0.UpgradeName
+	versionName := v0_6_0.UpgradeName
 	m.T.Log("--- Getting Emissions Module Version Before Upgrade ---")
 	emissionsVersionBefore := getEmissionsVersion(m)
 	m.T.Logf("--- Propose Upgrade to %s software version from v0 ---", versionName)
@@ -157,5 +175,8 @@ func UpgradeChecks(m testCommon.TestConfig) {
 	m.T.Log("--- Getting Emissions Module Version After Upgrade ---")
 	emissionsVersionAfter := getEmissionsVersion(m)
 	m.T.Log("--- Checking Emissions Module Version Has Been Upgraded ---")
-	require.Greater(m.T, emissionsVersionAfter, emissionsVersionBefore)
+	require.Equal(m.T, emissionsVersionAfter, emissionsVersionBefore)
+	height := getAppliedVersionHeight(m, versionName)
+	m.T.Log("--- Checking upgrade has been applied at the proposed height ---")
+	require.Equal(m.T, proposalHeight, height)
 }

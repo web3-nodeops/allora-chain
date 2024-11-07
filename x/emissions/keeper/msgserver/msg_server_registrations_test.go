@@ -20,20 +20,18 @@ func (s *MsgServerTestSuite) TestMsgRegisterReputer() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
-	creatorAddress := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress.String()}
+	reputerAddr := s.addrs[0]
+	topic1 := s.CreateOneTopic()
 
 	// Topic register
-	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
+	err := s.emissionsKeeper.SetTopic(ctx, topic1.Id, topic1)
 	require.NoError(err, "SetTopic should not return an error")
-	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
+	err = s.emissionsKeeper.ActivateTopic(ctx, topic1.Id)
 	require.NoError(err, "ActivateTopic should not return an error")
 	// Reputer register
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: true,
 		Owner:     reputerAddr.String(),
 	}
@@ -52,14 +50,14 @@ func (s *MsgServerTestSuite) TestMsgRegisterReputer() {
 	)
 	require.NoError(err, "SendCoinsFromModuleToAccount should not return an error")
 
-	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topicId, reputerAddr.String())
+	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topic1.Id, reputerAddr.String())
 	require.NoError(err)
 	require.False(isReputerRegistered, "Reputer should not be registered in topic")
 
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering reputer should not return an error")
 
-	isReputerRegistered, err = s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topicId, reputerAddr.String())
+	isReputerRegistered, err = s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topic1.Id, reputerAddr.String())
 	require.NoError(err)
 	require.True(isReputerRegistered, "Reputer should be registered in topic")
 }
@@ -69,20 +67,18 @@ func (s *MsgServerTestSuite) TestMsgRemoveRegistration() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
-	creatorAddress := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress.String()}
+	reputerAddr := s.addrs[0]
+	topic1 := s.CreateOneTopic()
 
 	// Topic register
-	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
+	err := s.emissionsKeeper.SetTopic(ctx, topic1.Id, topic1)
 	require.NoError(err)
-	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
+	err = s.emissionsKeeper.ActivateTopic(ctx, topic1.Id)
 	require.NoError(err)
 	// Reputer register
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: true,
 		Owner:     reputerAddr.String(),
 	}
@@ -103,20 +99,20 @@ func (s *MsgServerTestSuite) TestMsgRemoveRegistration() {
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering reputer should not return an error")
 
-	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topicId, reputerAddr.String())
+	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topic1.Id, reputerAddr.String())
 	require.NoError(err)
 	require.True(isReputerRegistered, "Reputer should be registered in topic")
 
-	unregisterMsg := &types.MsgRemoveRegistration{
+	unregisterMsg := &types.RemoveRegistrationRequest{
 		Sender:    reputerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: true,
 	}
 
 	_, err = msgServer.RemoveRegistration(ctx, unregisterMsg)
 	require.NoError(err, "Registering reputer should not return an error")
 
-	isReputerRegistered, err = s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topicId, reputerAddr.String())
+	isReputerRegistered, err = s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topic1.Id, reputerAddr.String())
 	require.NoError(err)
 	require.False(isReputerRegistered, "Reputer should be registered in topic")
 }
@@ -126,20 +122,18 @@ func (s *MsgServerTestSuite) TestMsgRegisterWorker() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	workerAddr := sdk.AccAddress(PKS[0].Address())
-	creatorAddress := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress.String()}
+	workerAddr := s.addrs[0]
+	topic1 := s.CreateOneTopic()
 
 	// Topic register
-	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
+	err := s.emissionsKeeper.SetTopic(ctx, topic1.Id, topic1)
 	require.NoError(err)
-	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
+	err = s.emissionsKeeper.ActivateTopic(ctx, topic1.Id)
 	require.NoError(err)
 	// Reputer register
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    workerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: false,
 		Owner:     workerAddr.String(),
 	}
@@ -157,18 +151,18 @@ func (s *MsgServerTestSuite) TestMsgRegisterWorker() {
 	)
 	require.NoError(err, "SendCoinsFromModuleToAccount should not return an error")
 
-	isWorkerRegistered, err := s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topicId, workerAddr.String())
+	isWorkerRegistered, err := s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topic1.Id, workerAddr.String())
 	require.NoError(err)
 	require.False(isWorkerRegistered, "Worker should not be registered in topic")
 
-	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topicId, workerAddr.String())
+	isReputerRegistered, err := s.emissionsKeeper.IsReputerRegisteredInTopic(ctx, topic1.Id, workerAddr.String())
 	require.NoError(err)
 	require.False(isReputerRegistered, "Reputer should not be registered in topic")
 
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering worker should not return an error")
 
-	isWorkerRegistered, err = s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topicId, workerAddr.String())
+	isWorkerRegistered, err = s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topic1.Id, workerAddr.String())
 	require.NoError(err)
 	require.True(isWorkerRegistered, "Worker should be registered in topic")
 }
@@ -178,20 +172,18 @@ func (s *MsgServerTestSuite) TestMsgRemoveRegistrationWorker() {
 	require := s.Require()
 
 	// Mock setup for addresses
-	workerAddr := sdk.AccAddress(PKS[0].Address())
-	creatorAddress := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(1)
-	topic1 := types.Topic{Id: topicId, Creator: creatorAddress.String()}
+	workerAddr := s.addrs[0]
+	topic1 := s.CreateOneTopic()
 
 	// Topic register
-	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
+	err := s.emissionsKeeper.SetTopic(ctx, topic1.Id, topic1)
 	require.NoError(err)
-	err = s.emissionsKeeper.ActivateTopic(ctx, topicId)
+	err = s.emissionsKeeper.ActivateTopic(ctx, topic1.Id)
 	require.NoError(err)
 	// Reputer register
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    workerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: false,
 		Owner:     workerAddr.String(),
 	}
@@ -212,20 +204,20 @@ func (s *MsgServerTestSuite) TestMsgRemoveRegistrationWorker() {
 	_, err = msgServer.Register(ctx, registerMsg)
 	require.NoError(err, "Registering worker should not return an error")
 
-	isWorkerRegistered, err := s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topicId, workerAddr.String())
+	isWorkerRegistered, err := s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topic1.Id, workerAddr.String())
 	require.NoError(err)
 	require.True(isWorkerRegistered, "Worker should be registered in topic")
 
-	unregisterMsg := &types.MsgRemoveRegistration{
+	unregisterMsg := &types.RemoveRegistrationRequest{
 		Sender:    workerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: false,
 	}
 
 	_, err = msgServer.RemoveRegistration(ctx, unregisterMsg)
 	require.NoError(err, "Unregistering worker should not return an error")
 
-	isWorkerRegistered, err = s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topicId, workerAddr.String())
+	isWorkerRegistered, err = s.emissionsKeeper.IsWorkerRegisteredInTopic(ctx, topic1.Id, workerAddr.String())
 	require.NoError(err)
 	require.False(isWorkerRegistered, "Worker should be registered in topic")
 }
@@ -233,23 +225,22 @@ func (s *MsgServerTestSuite) TestMsgRemoveRegistrationWorker() {
 func (s *MsgServerTestSuite) TestMsgRegisterReputerInsufficientBalance() {
 	ctx, msgServer := s.ctx, s.msgServer
 	require := s.Require()
-	topicId := s.CreateOneTopic()
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
-	topic1 := types.Topic{Id: topicId, Creator: reputerAddr.String()}
-	err := s.emissionsKeeper.SetTopic(ctx, topicId, topic1)
+	reputerAddr := s.addrs[0]
+	topic1 := s.CreateOneTopic()
+	err := s.emissionsKeeper.SetTopic(ctx, topic1.Id, topic1)
 	require.NoError(err)
-	err = s.emissionsKeeper.ActivateTopic(ctx, 1)
+	err = s.emissionsKeeper.ActivateTopic(ctx, topic1.Id)
 	require.NoError(err)
 	// Zero initial stake
 
 	s.MintTokensToAddress(reputerAddr, cosmosMath.NewInt(1))
 	// Topic does not exist
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
 		Owner:     reputerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: true,
 	}
 	_, err = msgServer.Register(ctx, registerMsg)
@@ -259,21 +250,21 @@ func (s *MsgServerTestSuite) TestMsgRegisterReputerInsufficientBalance() {
 func (s *MsgServerTestSuite) TestMsgRegisterReputerInsufficientDenom() {
 	ctx, msgServer := s.ctx, s.msgServer
 	require := s.Require()
-	topicId := s.CreateOneTopic()
+	topic1 := s.CreateOneTopic()
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
+	reputerAddr := s.addrs[0]
 	registrationInitialStake := cosmosMath.NewInt(100)
 
 	// Register Reputer
-	reputerRegMsg := &types.MsgRegister{
+	reputerRegMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
-		TopicId:   topicId,
+		TopicId:   topic1.Id,
 		IsReputer: true,
 		Owner:     reputerAddr.String(),
 	}
 
-	err := s.emissionsKeeper.AddReputerStake(ctx, topicId, reputerAddr.String(), registrationInitialStake.QuoRaw(2))
+	err := s.emissionsKeeper.AddReputerStake(ctx, topic1.Id, reputerAddr.String(), registrationInitialStake.QuoRaw(2))
 	require.NoError(err)
 
 	// Try to register without any funds to pay fees
@@ -314,13 +305,14 @@ func (s *MsgServerTestSuite) TestBlocklistedAddressUnableToRegister() {
 
 	s.MintTokensToAddress(worker, cosmosMath.NewInt(10).Mul(cosmosOneE18))
 	// Create topic
-	newTopicMsg := &types.MsgCreateNewTopic{
+	newTopicMsg := &types.CreateNewTopicRequest{
 		Creator:                  worker.String(),
 		Metadata:                 "test",
 		LossMethod:               "mse",
 		EpochLength:              epochLength,
 		GroundTruthLag:           epochLength,
 		WorkerSubmissionWindow:   10,
+		AllowNegative:            false,
 		AlphaRegret:              alloraMath.NewDecFromInt64(1),
 		PNorm:                    alloraMath.NewDecFromInt64(3),
 		Epsilon:                  alloraMath.MustNewDecFromString("0.01"),
@@ -335,7 +327,7 @@ func (s *MsgServerTestSuite) TestBlocklistedAddressUnableToRegister() {
 	topicId := res.TopicId
 
 	// Register 1 worker
-	workerRegMsg := &types.MsgRegister{
+	workerRegMsg := &types.RegisterRequest{
 		Sender:    worker.String(),
 		TopicId:   topicId,
 		IsReputer: false,
@@ -344,7 +336,7 @@ func (s *MsgServerTestSuite) TestBlocklistedAddressUnableToRegister() {
 	_, err = s.msgServer.Register(s.ctx, workerRegMsg)
 	s.Require().NoError(err)
 
-	reputerRegMsg := &types.MsgRegister{
+	reputerRegMsg := &types.RegisterRequest{
 		Sender:    reputer.String(),
 		TopicId:   topicId,
 		IsReputer: true,
@@ -361,10 +353,10 @@ func (s *MsgServerTestSuite) TestMsgRegisterReputerInvalidTopicNotExist() {
 	topicId := uint64(0)
 
 	// Mock setup for addresses
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
+	reputerAddr := s.addrs[3]
 
 	// Topic does not exist
-	registerMsg := &types.MsgRegister{
+	registerMsg := &types.RegisterRequest{
 		Sender:    reputerAddr.String(),
 		Owner:     reputerAddr.String(),
 		TopicId:   topicId,

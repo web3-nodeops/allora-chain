@@ -71,6 +71,32 @@ func TestMakeMapFromWorkerToTheirWork(t *testing.T) {
 	}
 }
 
+func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesWhenNoInferences() {
+	require := s.Require()
+	topicId := uint64(1)
+	blockHeight := int64(300)
+
+	_, err :=
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			&blockHeight,
+		)
+	require.Error(err)
+	require.Equal("while getting inferences: no inferences found for topic 1 at block 300: invalid request", err.Error())
+
+	_, err =
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			nil,
+		)
+	require.Error(err)
+	require.Equal("while getting inferences: no inferences found for topic 1 at latest block: invalid request", err.Error())
+}
+
 func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlock() {
 	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
 	epoch2Get := epochGet[302]
@@ -84,64 +110,57 @@ func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlock() {
 	blockHeightPreviousLosses := int64(200)
 
 	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
-	reputerRequestNonce := &emissionstypes.ReputerRequestNonce{
-		ReputerNonce: &emissionstypes.Nonce{BlockHeight: blockHeightPreviousLosses},
-	}
 
-	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, emissionstypes.Topic{
-		Id:                     topicId,
-		Creator:                "creator",
-		Metadata:               "metadata",
-		LossMethod:             "mse",
-		EpochLastEnded:         0,
-		EpochLength:            100,
-		GroundTruthLag:         10,
-		WorkerSubmissionWindow: 10,
-		PNorm:                  alloraMath.NewDecFromInt64(3),
-		AlphaRegret:            alloraMath.MustNewDecFromString("0.1"),
-		AllowNegative:          false,
-		Epsilon:                alloraMath.MustNewDecFromString("0.01"),
-	})
+	topic := s.mockTopic()
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
 	s.Require().NoError(err)
 
-	inferer0 := "allo1m5v6rgjtxh4xszrrzqacwjh4ve6r0za2gxx9qr"
-	inferer1 := "allo1e7cj9839ht2xm8urynqs5279hrvqd8neusvp2x"
-	inferer2 := "allo1k9ss0xfer54nyack5678frl36e5g3rj2yzxtfj"
-	inferer3 := "allo18ljxewge4vqrkk09tm5heldqg25yj8d9ekgkw5"
-	inferer4 := "allo1k36ljvn8z0u49sagdg46p75psgreh23kdjn3l0"
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
 	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-	forecaster0 := "allo1pluvmvsmvecg2ccuqxa6ugzvc3a5udfyy0t76v"
-	forecaster1 := "allo1e92saykj94jw3z55g4d3lfz098ppk0suwzc03a"
-	forecaster2 := "allo1pk6mxny5p79t8zhkm23z7u3zmfuz2gn0snxkkt"
+	forecaster0 := s.addrsStr[5]
+	forecaster1 := s.addrsStr[6]
+	forecaster2 := s.addrsStr[7]
 	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
 
 	// Set Previous Loss
-	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, emissionstypes.ValueBundle{
-		CombinedValue:       epoch2Get("network_loss"),
-		ReputerRequestNonce: reputerRequestNonce,
-		TopicId:             topicId,
-	})
+	valueBundlePrevious := s.mockEmptyValueBundle(epoch2Get("network_loss"))
+	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, valueBundlePrevious)
 	require.NoError(err)
 
 	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch3Get)
 	s.Require().NoError(err)
 
-	err = keeper.InsertInferences(s.ctx, topicId, simpleNonce, inferences)
+	err = keeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
 	s.Require().NoError(err)
 
-	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeight, infererAddresses, forecasterAddresses, epoch3Get)
+	forecasts, err := testutil.GetForecastsFromCsv(
+		topicId,
+		blockHeight,
+		infererAddresses,
+		forecasterAddresses,
+		epoch3Get,
+	)
 	s.Require().NoError(err)
 
-	err = keeper.InsertForecasts(s.ctx, topicId, simpleNonce, forecasts)
+	err = keeper.InsertActiveForecasts(s.ctx, topicId, simpleNonce.BlockHeight, forecasts)
 	s.Require().NoError(err)
 
 	// Set regrets from the previous epoch
-	err = testutil.SetRegretsFromPreviousEpoch(s.ctx, s.emissionsKeeper, topicId, blockHeight, infererAddresses, forecasterAddresses, epoch2Get)
+	err = testutil.SetRegretsFromPreviousEpoch(s.ctx, s.emissionsKeeper, topicId,
+		blockHeight,
+		infererAddresses,
+		forecasterAddresses,
+		epoch2Get,
+	)
 	s.Require().NoError(err)
 
 	// Calculate
-	valueBundle, _, _, _, _, _, err :=
+	result, err :=
 		inferencesynthesis.GetNetworkInferences(
 			s.ctx,
 			s.emissionsKeeper,
@@ -149,6 +168,9 @@ func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlock() {
 			&blockHeight,
 		)
 	require.NoError(err)
+	s.Require().Equal(result.LossBlockHeight, blockHeightPreviousLosses)
+	valueBundle := result.NetworkInferences
+
 	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, epoch3Get("network_inference").String())
 	testutil.InEpsilon5(s.T(), valueBundle.NaiveValue, epoch3Get("network_naive_inference").String())
 
@@ -225,372 +247,392 @@ func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlock() {
 	}
 }
 
-// TODO: Need to revisit these tests after finshing non-edge case tests
-// func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithJustOneNotNewForecaster() {
-// 	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
-// 	epoch2Get := epochGet[302]
-// 	epoch3Get := epochGet[303]
+func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithNoPreviousLossesFromCsv() {
+	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
+	epoch2Get := epochGet[302]
+	topicId := uint64(1)
+	blockHeight := int64(300)
+	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
 
-// 	require := s.Require()
-// 	keeper := s.emissionsKeeper
+	topic := s.mockTopic()
+	topic.InitialRegret = alloraMath.ZeroDec()
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
+	s.Require().NoError(err)
 
-// 	topicId := uint64(1)
-// 	blockHeight := int64(300)
-// 	blockHeightPreviousLosses := int64(200)
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
+	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-// 	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
-// 	reputerRequestNonce := &emissionstypes.ReputerRequestNonce{
-// 		ReputerNonce: &emissionstypes.Nonce{BlockHeight: blockHeightPreviousLosses},
-// 	}
+	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-//err := s.emissionsKeeper.SetTopic(s.ctx, topicId, emissionstypes.Topic{
-//	Id:                     topicId,
-//	Creator:                "creator",
-//	Metadata:               "metadata",
-//	LossMethod:             "mse",
-//	EpochLastEnded:         0,
-//	EpochLength:            100,
-//	GroundTruthLag:         10,
-//	WorkerSubmissionWindow: 10,
-//	PNorm:                  alloraMath.NewDecFromInt64(3),
-//	AlphaRegret:            alloraMath.MustNewDecFromString("0.1"),
-//	AllowNegative:          false,
-//	Epsilon:                alloraMath.MustNewDecFromString("0.0001"),
-//})
-//s.Require().NoError(err)
+	err = s.emissionsKeeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
+	s.Require().NoError(err)
 
-// 	inferer0 := "allo1m5v6rgjtxh4xszrrzqacwjh4ve6r0za2gxx9qr"
-// 	inferer1 := "allo1e7cj9839ht2xm8urynqs5279hrvqd8neusvp2x"
-// 	inferer2 := "allo1k9ss0xfer54nyack5678frl36e5g3rj2yzxtfj"
-// 	inferer3 := "allo18ljxewge4vqrkk09tm5heldqg25yj8d9ekgkw5"
-// 	inferer4 := "allo1k36ljvn8z0u49sagdg46p75psgreh23kdjn3l0"
-// 	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
+	result, err :=
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			&blockHeight,
+		)
+	s.Require().NoError(err)
+	testutil.InEpsilon5(s.T(), result.NetworkInferences.CombinedValue, "0.1997509073157136")
+}
 
-// 	forecaster0 := "allo1pluvmvsmvecg2ccuqxa6ugzvc3a5udfyy0t76v"
-// 	forecaster1 := "allo1e92saykj94jw3z55g4d3lfz098ppk0suwzc03a"
-// 	forecaster2 := "allo1pk6mxny5p79t8zhkm23z7u3zmfuz2gn0snxkkt"
-// 	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
+func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithOneOldInfererNoForecastersFromCsv() {
+	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
+	epoch1Get := epochGet[301]
+	epoch2Get := epochGet[302]
+	topicId := uint64(1)
+	blockHeight := int64(300)
+	blockHeightPreviousLosses := int64(200)
+	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
 
-// 	// Set Previous Loss
-// 	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, emissionstypes.ValueBundle{
-// 		CombinedValue:       epoch2Get("network_loss"),
-// 		ReputerRequestNonce: reputerRequestNonce,
-// 		TopicId:             topicId,
-// 	})
-// 	require.NoError(err)
+	topic := s.mockTopic()
+	topic.InitialRegret = alloraMath.MustNewDecFromString("-1.8331309069480215")
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
+	s.Require().NoError(err)
 
-// 	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch3Get)
-// 	s.Require().NoError(err)
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
+	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-// 	err = keeper.InsertInferences(s.ctx, topicId, simpleNonce, inferences)
-// 	s.Require().NoError(err)
+	// Set Previous Loss
+	valueBundlePrevious := s.mockEmptyValueBundle(epoch1Get("network_loss"))
+	err = s.emissionsKeeper.InsertNetworkLossBundleAtBlock(
+		s.ctx, topicId, blockHeightPreviousLosses, valueBundlePrevious)
+	s.Require().NoError(err)
 
-// 	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeight, infererAddresses, forecasterAddresses, epoch3Get)
-// 	s.Require().NoError(err)
+	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-// 	err = keeper.InsertForecasts(s.ctx, topicId, simpleNonce, forecasts)
-// 	s.Require().NoError(err)
+	err = s.emissionsKeeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
+	s.Require().NoError(err)
 
-// 	// Set inferer network regrets
-// 	infererNetworkRegrets := map[string]inferencesynthesis.Regret{
-// 		inferer0: epoch2Get("inference_regret_worker_0"),
-// 		inferer1: epoch2Get("inference_regret_worker_1"),
-// 		inferer2: epoch2Get("inference_regret_worker_2"),
-// 		inferer3: epoch2Get("inference_regret_worker_3"),
-// 		inferer4: epoch2Get("inference_regret_worker_4"),
-// 	}
+	// Set regrets from the previous epoch
+	err = testutil.SetRegretsFromPreviousEpoch(
+		s.ctx, s.emissionsKeeper, topicId, blockHeight, []string{inferer0}, []string{}, epoch1Get)
+	s.Require().NoError(err)
 
-// 	for inferer, regret := range infererNetworkRegrets {
-// 		s.emissionsKeeper.SetInfererNetworkRegret(
-// 			s.ctx,
-// 			topicId,
-// 			inferer,
-// 			emissionstypes.TimestampedValue{BlockHeight: blockHeight, Value: regret},
-// 		)
-// 	}
+	result, err :=
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			&blockHeight,
+		)
+	s.Require().NoError(err)
+	valueBundle := result.NetworkInferences
 
-// 	// Set forecaster network regrets - just one of the forecasters
-// 	forecasterNetworkRegrets := map[string]inferencesynthesis.Regret{
-// 		forecaster0: epoch2Get("inference_regret_worker_7"),
-// 	}
-// 	allRegrets := make([]inferencesynthesis.Regret, 0)
-// 	for _, regret := range infererNetworkRegrets {
+	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, "0.20059970801966293")
 
-// 		allRegrets = append(allRegrets, regret)
-// 	}
-// 	allRegrets = append(allRegrets, forecasterNetworkRegrets[forecaster0])
+	s.Require().Len(valueBundle.OneOutInfererValues, 5)
+	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
+		switch oneOutInfererValue.Worker {
+		case inferer0:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.1404419672286048")
+		case inferer1:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.1288457756437288")
+		case inferer2:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.1431887680171583")
+		case inferer3:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.18794792677471128")
+		case inferer4:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.17208154172014362")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneOutInfererValue.Worker)
+		}
+	}
+}
 
-// 	for forecaster, regret := range forecasterNetworkRegrets {
-// 		s.emissionsKeeper.SetForecasterNetworkRegret(
-// 			s.ctx,
-// 			topicId,
-// 			forecaster,
-// 			emissionstypes.TimestampedValue{BlockHeight: blockHeight, Value: regret},
-// 		)
-// 	}
+func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithOldInferersOneOldForecasterFromCsv() {
+	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
+	epoch1Get := epochGet[301]
+	epoch2Get := epochGet[302]
 
-// 	// Set one in forecaster network regrets
-// 	setOneInForecasterNetworkRegret := func(forecaster string, inferer string, value string) {
-// 		keeper.SetOneInForecasterNetworkRegret(
-// 			s.ctx,
-// 			topicId,
-// 			forecaster,
-// 			inferer,
-// 			emissionstypes.TimestampedValue{
-// 				BlockHeight: blockHeight,
-// 				Value:       alloraMath.MustNewDecFromString(value),
-// 			},
-// 		)
-// 	}
+	topicId := uint64(1)
+	blockHeight := int64(300)
+	blockHeightPreviousLosses := int64(200)
+	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
 
-// 	/// Epoch 3 values
-// 	setOneInForecasterNetworkRegret(forecaster0, inferer0, epoch2Get("inference_regret_worker_2_onein_2").String())
-// 	setOneInForecasterNetworkRegret(forecaster0, inferer1, epoch2Get("inference_regret_worker_1_onein_2").String())
-// 	setOneInForecasterNetworkRegret(forecaster0, inferer2, epoch2Get("inference_regret_worker_2_onein_2").String())
-// 	setOneInForecasterNetworkRegret(forecaster0, inferer3, epoch2Get("inference_regret_worker_3_onein_2").String())
-// 	setOneInForecasterNetworkRegret(forecaster0, inferer4, epoch2Get("inference_regret_worker_4_onein_2").String())
-// 	setOneInForecasterNetworkRegret(forecaster0, forecaster0, epoch2Get("inference_regret_worker_5_onein_2").String())
+	topic := s.mockTopic()
+	topic.InitialRegret = alloraMath.MustNewDecFromString("-3.7780955644806307")
 
-// 	// Update topic initial regret for new participants
-// 	epsilon := alloraMath.MustNewDecFromString("0.01")
-// 	pNorm := alloraMath.MustNewDecFromString("3.0")
-// 	cNorm := alloraMath.MustNewDecFromString("0.75")
-// 	initialRegret, err := inferencesynthesis.CalcTopicInitialRegret(allRegrets, epsilon, pNorm, cNorm)
-// 	require.NoError(err)
-// 	testutil.InEpsilon5(s.T(), initialRegret, "-3.112687101514772")
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
+	s.Require().NoError(err)
 
-// 	err = s.emissionsKeeper.UpdateTopicInitialRegret(s.ctx, topicId, initialRegret)
-// 	require.NoError(err)
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
+	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-// 	// Calculate network inference
-// 	valueBundle, _, _, _, err :=
-// 		inferencesynthesis.GetNetworkInferencesAtBlock(
-// 			s.ctx,
-// 			s.emissionsKeeper,
-// 			topicId,
-// 			blockHeight,
-// 			blockHeightPreviousLosses,
-// 		)
-// 	require.NoError(err)
+	forecaster0 := s.addrsStr[5]
+	forecaster1 := s.addrsStr[6]
+	forecaster2 := s.addrsStr[7]
+	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
 
-// 	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, "0.13832892076283418")
-// 	testutil.InEpsilon5(s.T(), valueBundle.NaiveValue, "-0.217498746751143482")
+	// Set Previous Loss
+	emptyValueBundle := s.mockEmptyValueBundle(epoch1Get("network_loss"))
+	err = s.emissionsKeeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, emptyValueBundle)
+	s.Require().NoError(err)
 
-// 	for _, inference := range inferences.Inferences {
-// 		found := false
-// 		for _, infererValue := range valueBundle.InfererValues {
-// 			if string(inference.Inferer) == infererValue.Worker {
-// 				found = true
-// 				require.Equal(inference.Value, infererValue.Value)
-// 			}
-// 		}
-// 		require.True(found, "Inference not found")
-// 	}
+	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-// 	for _, forecasterValue := range valueBundle.ForecasterValues {
-// 		switch string(forecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.16104230535974168")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.2129694366166174")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.19537706255730902")
-// 		default:
-// 			require.Fail("Unexpected forecaster %v", forecasterValue.Worker)
-// 		}
-// 	}
+	err = s.emissionsKeeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
+	s.Require().NoError(err)
 
-// 	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
-// 		switch string(oneOutInfererValue.Worker) {
-// 		case inferer0:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.18159007177591316")
-// 		case inferer1:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.1891891776070881")
-// 		case inferer2:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.2453618383732347")
-// 		case inferer3:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.17135248130644976")
-// 		case inferer4:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.2519675192553942")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneOutInfererValue.Worker)
-// 		}
-// 	}
+	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeight, infererAddresses, forecasterAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-// 	for _, oneOutForecasterValue := range valueBundle.OneOutForecasterValues {
-// 		switch string(oneOutForecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.21430649513970956")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.20645616254043958")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.20875138413550787")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneOutForecasterValue.Worker)
-// 		}
-// 	}
+	err = s.emissionsKeeper.InsertActiveForecasts(s.ctx, topicId, simpleNonce.BlockHeight, forecasts)
+	s.Require().NoError(err)
 
-// 	for _, oneInForecasterValue := range valueBundle.OneInForecasterValues {
-// 		switch string(oneInForecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.20808933985257652")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.21674386172872248")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.21381179938550443")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneInForecasterValue.Worker)
-// 		}
-// 	}
-// }
+	// Set regrets from the previous epoch
+	err = testutil.SetRegretsFromPreviousEpoch(
+		s.ctx,
+		s.emissionsKeeper,
+		topicId,
+		blockHeight,
+		infererAddresses,
+		[]string{forecaster0},
+		epoch1Get,
+	)
+	s.Require().NoError(err)
 
-// func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithAllInferersForecastersNew() {
-// 	s.SetupTest()
-// 	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
-// 	epoch2Get := epochGet[302]
-// 	epoch3Get := epochGet[303]
+	// Calculate
+	result, err :=
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			&blockHeight,
+		)
+	s.Require().NoError(err)
+	valueBundle := result.NetworkInferences
 
-// 	require := s.Require()
-// 	keeper := s.emissionsKeeper
+	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, "0.09643700801928372")
 
-// 	topicId := uint64(1)
-// 	blockHeightInferences := int64(300)
-// 	blockHeightPreviousLosses := int64(200)
+	s.Require().Len(valueBundle.InfererValues, 5)
+	for _, inference := range inferences.Inferences {
+		found := false
+		for _, infererValue := range valueBundle.InfererValues {
+			if inference.Inferer == infererValue.Worker {
+				found = true
+				s.Require().Equal(inference.Value, infererValue.Value)
+			}
+		}
+		s.Require().True(found, "Inference not found")
+	}
 
-// 	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeightInferences}
-// 	reputerRequestNonce := &emissionstypes.ReputerRequestNonce{
-// 		ReputerNonce: &emissionstypes.Nonce{BlockHeight: blockHeightPreviousLosses},
-// 	}
+	s.Require().Len(valueBundle.ForecasterValues, 3)
+	for _, forecasterValue := range valueBundle.ForecasterValues {
+		switch forecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.08475997300723974")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.0807110022144602")
+		case forecaster2:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.07851400736008668")
+		default:
+			s.Require().Fail("Unexpected forecaster %v", forecasterValue.Worker)
+		}
+	}
 
-//err := s.emissionsKeeper.SetTopic(s.ctx, topicId, emissionstypes.Topic{
-//	Id:                     topicId,
-//	Creator:                "creator",
-//	Metadata:               "metadata",
-//	LossMethod:             "mse",
-//	EpochLastEnded:         0,
-//	EpochLength:            100,
-//	GroundTruthLag:         10,
-//	WorkerSubmissionWindow: 10,
-//	PNorm:                  alloraMath.NewDecFromInt64(3),
-//	AlphaRegret:            alloraMath.MustNewDecFromString("0.1"),
-//	AllowNegative:          false,
-//	Epsilon:                alloraMath.MustNewDecFromString("0.0001"),
-//})
-//s.Require().NoError(err)
+	s.Require().Len(valueBundle.OneOutInfererValues, 5)
+	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
+		switch oneOutInfererValue.Worker {
+		case inferer0:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.10278833087892551")
+		case inferer1:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.10309434130026068")
+		case inferer2:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.10749347667557652")
+		case inferer3:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.09957413455954356")
+		case inferer4:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.23133130005198607")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneOutInfererValue.Worker)
+		}
+	}
 
-// 	inferer0 := "allo1m5v6rgjtxh4xszrrzqacwjh4ve6r0za2gxx9qr"
-// 	inferer1 := "allo1e7cj9839ht2xm8urynqs5279hrvqd8neusvp2x"
-// 	inferer2 := "allo1k9ss0xfer54nyack5678frl36e5g3rj2yzxtfj"
-// 	inferer3 := "allo18ljxewge4vqrkk09tm5heldqg25yj8d9ekgkw5"
-// 	inferer4 := "allo1k36ljvn8z0u49sagdg46p75psgreh23kdjn3l0"
-// 	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
+	s.Require().Len(valueBundle.OneOutForecasterValues, 3)
+	for _, oneOutForecasterValue := range valueBundle.OneOutForecasterValues {
+		switch oneOutForecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.19384484001403682")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.13368285139309616")
+		case forecaster2:
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.1339967078008638")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneOutForecasterValue.Worker)
+		}
+	}
 
-// 	forecaster0 := "allo1pluvmvsmvecg2ccuqxa6ugzvc3a5udfyy0t76v"
-// 	forecaster1 := "allo1e92saykj94jw3z55g4d3lfz098ppk0suwzc03a"
-// 	forecaster2 := "allo1pk6mxny5p79t8zhkm23z7u3zmfuz2gn0snxkkt"
-// 	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
+	s.Require().Len(valueBundle.OneInForecasterValues, 3)
+	for _, oneInForecasterValue := range valueBundle.OneInForecasterValues {
+		switch oneInForecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.086385958713291")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.14220283026646785")
+		case forecaster2:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.1418366644574056")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneInForecasterValue.Worker)
+		}
+	}
+}
 
-// 	// Set Previous Loss
-// 	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, emissionstypes.ValueBundle{
-// 		CombinedValue:       epoch2Get("network_loss"),
-// 		ReputerRequestNonce: reputerRequestNonce,
-// 		TopicId:             topicId,
-// 	})
-// 	require.NoError(err)
+func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesAtBlockWithOldInferersAllNewForecastersFromCsv() {
+	epochGet := testutil.GetSimulatedValuesGetterForEpochs()
+	epoch1Get := epochGet[301]
+	epoch2Get := epochGet[302]
 
-// 	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeightInferences, infererAddresses, epoch3Get)
-// 	s.Require().NoError(err)
+	topicId := uint64(1)
+	blockHeight := int64(300)
+	blockHeightPreviousLosses := int64(200)
 
-// 	err = keeper.InsertInferences(s.ctx, topicId, simpleNonce, inferences)
-// 	s.Require().NoError(err)
+	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeight}
 
-// 	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeightInferences, infererAddresses, forecasterAddresses, epoch3Get)
-// 	s.Require().NoError(err)
+	topic := s.mockTopic()
+	topic.InitialRegret = alloraMath.MustNewDecFromString("-3.0557074373274475")
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
+	s.Require().NoError(err)
 
-// 	err = keeper.InsertForecasts(s.ctx, topicId, simpleNonce, forecasts)
-// 	s.Require().NoError(err)
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
+	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-// 	// Calculate
-// 	valueBundle, _, _, _, err :=
-// 		inferencesynthesis.GetNetworkInferencesAtBlock(
-// 			s.ctx,
-// 			s.emissionsKeeper,
-// 			topicId,
-// 			blockHeightInferences,
-// 			blockHeightPreviousLosses,
-// 		)
+	forecaster0 := s.addrsStr[5]
+	forecaster1 := s.addrsStr[6]
+	forecaster2 := s.addrsStr[7]
+	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
 
-// 	require.NoError(err)
-// 	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, "-0.20711031728617318")
-// 	testutil.InEpsilon5(s.T(), valueBundle.NaiveValue, "-0.217498746751143482")
+	// Set Previous Loss
+	emptyValueBundle := s.mockEmptyValueBundle(epoch1Get("network_loss"))
+	err = s.emissionsKeeper.InsertNetworkLossBundleAtBlock(
+		s.ctx, topicId, blockHeightPreviousLosses,
+		emptyValueBundle,
+	)
+	s.Require().NoError(err)
 
-// 	for _, inference := range inferences.Inferences {
-// 		found := false
-// 		for _, infererValue := range valueBundle.InfererValues {
-// 			if string(inference.Inferer) == infererValue.Worker {
-// 				found = true
-// 				require.Equal(inference.Value, infererValue.Value)
-// 			}
-// 		}
-// 		require.True(found, "Inference not found")
-// 	}
+	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeight, infererAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-// 	for _, forecasterValue := range valueBundle.ForecasterValues {
-// 		switch string(forecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.16104230535974168")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.2129694366166174")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), forecasterValue.Value, "-0.19537706255730902")
-// 		default:
-// 			require.Fail("Unexpected forecaster %v", forecasterValue.Worker)
-// 		}
-// 	}
+	err = s.emissionsKeeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
+	s.Require().NoError(err)
 
-// 	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
-// 		switch string(oneOutInfererValue.Worker) {
-// 		case inferer0:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.17891655703176346")
-// 		case inferer1:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.18952169458753146")
-// 		case inferer2:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.24439774598242406")
-// 		case inferer3:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.1731395049235943")
-// 		case inferer4:
-// 			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "-0.24978380449844517")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneOutInfererValue.Worker)
-// 		}
-// 	}
+	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeight, infererAddresses, forecasterAddresses, epoch2Get)
+	s.Require().NoError(err)
 
-// 	for _, oneOutForecasterValue := range valueBundle.OneOutForecasterValues {
-// 		switch string(oneOutForecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.21369146184709198")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.20627330023896687")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "-0.2087864965331538")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneOutForecasterValue.Worker)
-// 		}
-// 	}
+	err = s.emissionsKeeper.InsertActiveForecasts(s.ctx, topicId, simpleNonce.BlockHeight, forecasts)
+	s.Require().NoError(err)
 
-// 	for _, oneInForecasterValue := range valueBundle.OneInForecasterValues {
-// 		switch string(oneInForecasterValue.Worker) {
-// 		case forecaster0:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.2080893398525765")
-// 		case forecaster1:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.21674386172872245")
-// 		case forecaster2:
-// 			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "-0.2138117993855044")
-// 		default:
-// 			require.Fail("Unexpected worker %v", oneInForecasterValue.Worker)
-// 		}
-// 	}
-// }
+	// Set regrets from the previous epoch
+	err = testutil.SetRegretsFromPreviousEpoch(s.ctx, s.emissionsKeeper, topicId, blockHeight, infererAddresses, []string{}, epoch1Get)
+	s.Require().NoError(err)
+
+	// Calculate
+	result, err :=
+		inferencesynthesis.GetNetworkInferences(
+			s.ctx,
+			s.emissionsKeeper,
+			topicId,
+			&blockHeight,
+		)
+	s.Require().NoError(err)
+	valueBundle := result.NetworkInferences
+
+	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, "0.20065795737590336")
+
+	s.Require().Len(valueBundle.InfererValues, 5)
+	for _, inference := range inferences.Inferences {
+		found := false
+		for _, infererValue := range valueBundle.InfererValues {
+			if inference.Inferer == infererValue.Worker {
+				found = true
+				s.Require().Equal(inference.Value, infererValue.Value)
+			}
+		}
+		s.Require().True(found, "Inference not found")
+	}
+
+	s.Require().Len(valueBundle.ForecasterValues, 3)
+	for _, forecasterValue := range valueBundle.ForecasterValues {
+		switch forecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.08475997300723974")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.0807110022144602")
+		case forecaster2:
+			testutil.InEpsilon5(s.T(), forecasterValue.Value, "0.07851400736008668")
+		default:
+			s.Require().Fail("Unexpected forecaster %v", forecasterValue.Worker)
+		}
+	}
+
+	s.Require().Len(valueBundle.OneOutInfererValues, 5)
+	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
+		switch oneOutInfererValue.Worker {
+		case inferer0:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.195653799650153")
+		case inferer1:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.1768775314107972")
+		case inferer2:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.1931955480873375")
+		case inferer3:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.20197760150788802")
+		case inferer4:
+			testutil.InEpsilon5(s.T(), oneOutInfererValue.Value, "0.21429866100721226")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneOutInfererValue.Worker)
+		}
+	}
+
+	s.Require().Len(valueBundle.OneOutForecasterValues, 3)
+	for _, oneOutForecasterValue := range valueBundle.OneOutForecasterValues {
+		switch oneOutForecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.13310442699412764")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.13368285139309616")
+		case forecaster2:
+
+			testutil.InEpsilon5(s.T(), oneOutForecasterValue.Value, "0.1339967078008638")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneOutForecasterValue.Worker)
+		}
+	}
+
+	s.Require().Len(valueBundle.OneInForecasterValues, 3)
+	for _, oneInForecasterValue := range valueBundle.OneInForecasterValues {
+		switch oneInForecasterValue.Worker {
+		case forecaster0:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.1428776587319311")
+		case forecaster1:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.14220283026646785")
+		case forecaster2:
+			testutil.InEpsilon5(s.T(), oneInForecasterValue.Value, "0.1418366644574056")
+		default:
+			s.Require().Fail("Unexpected worker %v", oneInForecasterValue.Worker)
+		}
+	}
+}
 
 func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 	s.SetupTest()
@@ -604,66 +646,49 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 	topicId := uint64(1)
 	blockHeightInferences := int64(300)
 	blockHeightPreviousLosses := int64(200)
-
 	simpleNonce := emissionstypes.Nonce{BlockHeight: blockHeightInferences}
-	reputerRequestNonce := &emissionstypes.ReputerRequestNonce{
-		ReputerNonce: &emissionstypes.Nonce{BlockHeight: blockHeightPreviousLosses},
-	}
 
-	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, emissionstypes.Topic{
-		Id:                     topicId,
-		Creator:                "creator",
-		Metadata:               "metadata",
-		LossMethod:             "mse",
-		EpochLastEnded:         0,
-		EpochLength:            100,
-		GroundTruthLag:         10,
-		WorkerSubmissionWindow: 10,
-		PNorm:                  alloraMath.NewDecFromInt64(3),
-		AlphaRegret:            alloraMath.MustNewDecFromString("0.1"),
-		AllowNegative:          false,
-		Epsilon:                alloraMath.MustNewDecFromString("0.01"),
-	})
-	s.Require().NoError(err)
+	topic := s.mockTopic()
+	err := s.emissionsKeeper.SetTopic(s.ctx, topicId, topic)
+	require.NoError(err)
 
-	inferer0 := "allo1m5v6rgjtxh4xszrrzqacwjh4ve6r0za2gxx9qr"
-	inferer1 := "allo1e7cj9839ht2xm8urynqs5279hrvqd8neusvp2x"
-	inferer2 := "allo1k9ss0xfer54nyack5678frl36e5g3rj2yzxtfj"
-	inferer3 := "allo18ljxewge4vqrkk09tm5heldqg25yj8d9ekgkw5"
-	inferer4 := "allo1k36ljvn8z0u49sagdg46p75psgreh23kdjn3l0"
+	inferer0 := s.addrsStr[0]
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
+	inferer4 := s.addrsStr[4]
 	infererAddresses := []string{inferer0, inferer1, inferer2, inferer3, inferer4}
 
-	forecaster0 := "allo1pluvmvsmvecg2ccuqxa6ugzvc3a5udfyy0t76v"
-	forecaster1 := "allo1e92saykj94jw3z55g4d3lfz098ppk0suwzc03a"
-	forecaster2 := "allo1pk6mxny5p79t8zhkm23z7u3zmfuz2gn0snxkkt"
+	forecaster0 := s.addrsStr[5]
+	forecaster1 := s.addrsStr[6]
+	forecaster2 := s.addrsStr[7]
 	forecasterAddresses := []string{forecaster0, forecaster1, forecaster2}
 
 	// Set Previous Loss
-	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, emissionstypes.ValueBundle{
-		CombinedValue:       epoch2Get("network_loss"),
-		ReputerRequestNonce: reputerRequestNonce,
-		TopicId:             topicId,
-	})
+	valueBundlePrevious := s.mockEmptyValueBundle(epoch2Get("network_loss"))
+	err = keeper.InsertNetworkLossBundleAtBlock(s.ctx, topicId, blockHeightPreviousLosses, valueBundlePrevious)
 	require.NoError(err)
 
 	inferences, err := testutil.GetInferencesFromCsv(topicId, blockHeightInferences, infererAddresses, epoch3Get)
-	s.Require().NoError(err)
+	require.NoError(err)
 
-	err = keeper.InsertInferences(s.ctx, topicId, simpleNonce, inferences)
-	s.Require().NoError(err)
+	err = keeper.InsertActiveInferences(s.ctx, topicId, simpleNonce.BlockHeight, inferences)
+	require.NoError(err)
 
-	forecasts, err := testutil.GetForecastsFromCsv(topicId, blockHeightInferences, infererAddresses, forecasterAddresses, epoch3Get)
-	s.Require().NoError(err)
+	forecasts, err := testutil.GetForecastsFromCsv(
+		topicId, blockHeightInferences, infererAddresses, forecasterAddresses, epoch3Get)
+	require.NoError(err)
 
-	err = keeper.InsertForecasts(s.ctx, topicId, simpleNonce, forecasts)
-	s.Require().NoError(err)
+	err = keeper.InsertActiveForecasts(s.ctx, topicId, simpleNonce.BlockHeight, forecasts)
+	require.NoError(err)
 
 	// Set regrets from the previous epoch
-	err = testutil.SetRegretsFromPreviousEpoch(s.ctx, s.emissionsKeeper, topicId, blockHeightInferences, infererAddresses, forecasterAddresses, epoch2Get)
-	s.Require().NoError(err)
+	err = testutil.SetRegretsFromPreviousEpoch(
+		s.ctx, s.emissionsKeeper, topicId, blockHeightInferences, infererAddresses, forecasterAddresses, epoch2Get)
+	require.NoError(err)
 
 	// Calculate
-	valueBundle, _, _, _, _, _, err :=
+	result, err :=
 		inferencesynthesis.GetNetworkInferences(
 			s.ctx,
 			s.emissionsKeeper,
@@ -671,10 +696,12 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 			nil,
 		)
 	require.NoError(err)
+	valueBundle := result.NetworkInferences
+
 	testutil.InEpsilon5(s.T(), valueBundle.CombinedValue, epoch3Get("network_inference").String())
 	testutil.InEpsilon5(s.T(), valueBundle.NaiveValue, epoch3Get("network_naive_inference").String())
 
-	s.Require().Len(valueBundle.InfererValues, 5)
+	require.Len(valueBundle.InfererValues, 5)
 	for _, inference := range inferences.Inferences {
 		found := false
 		for _, infererValue := range valueBundle.InfererValues {
@@ -686,7 +713,7 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 		require.True(found, "Inference not found")
 	}
 
-	s.Require().Len(valueBundle.ForecasterValues, 3)
+	require.Len(valueBundle.ForecasterValues, 3)
 	for _, forecasterValue := range valueBundle.ForecasterValues {
 		switch forecasterValue.Worker {
 		case forecaster0:
@@ -700,7 +727,7 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 		}
 	}
 
-	s.Require().Len(valueBundle.OneOutInfererValues, 5)
+	require.Len(valueBundle.OneOutInfererValues, 5)
 	for _, oneOutInfererValue := range valueBundle.OneOutInfererValues {
 		switch oneOutInfererValue.Worker {
 		case inferer0:
@@ -718,7 +745,7 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 		}
 	}
 
-	s.Require().Len(valueBundle.OneOutForecasterValues, 3)
+	require.Len(valueBundle.OneOutForecasterValues, 3)
 	for _, oneOutForecasterValue := range valueBundle.OneOutForecasterValues {
 		switch oneOutForecasterValue.Worker {
 		case forecaster0:
@@ -732,7 +759,7 @@ func (s *InferenceSynthesisTestSuite) TestGetLatestNetworkInferenceFromCsv() {
 		}
 	}
 
-	s.Require().Len(valueBundle.OneInForecasterValues, 3)
+	require.Len(valueBundle.OneInForecasterValues, 3)
 	for _, oneInForecasterValue := range valueBundle.OneInForecasterValues {
 		switch oneInForecasterValue.Worker {
 		case forecaster0:
@@ -753,36 +780,40 @@ func (s *InferenceSynthesisTestSuite) TestGetNetworkInferencesWithMedianCalculat
 	topicId := uint64(1)
 	blockHeight := int64(300)
 
-	inferer1 := "worker1"
-	inferer2 := "worker2"
-	inferer3 := "worker3"
+	inferer1 := s.addrsStr[1]
+	inferer2 := s.addrsStr[2]
+	inferer3 := s.addrsStr[3]
 
 	inferences := emissionstypes.Inferences{
 		Inferences: []*emissionstypes.Inference{
 			{
-				TopicId: topicId,
-				Inferer: inferer1,
-				Value:   alloraMath.MustNewDecFromString("10.0"),
+				TopicId:     topicId,
+				BlockHeight: blockHeight,
+				Inferer:     inferer1,
+				Value:       alloraMath.MustNewDecFromString("10.0"),
 			},
 			{
-				TopicId: topicId,
-				Inferer: inferer2,
-				Value:   alloraMath.MustNewDecFromString("30.0"),
+				TopicId:     topicId,
+				BlockHeight: blockHeight,
+				Inferer:     inferer2,
+				Value:       alloraMath.MustNewDecFromString("30.0"),
 			},
 			{
-				TopicId: topicId,
-				Inferer: inferer3,
-				Value:   alloraMath.MustNewDecFromString("20.0"),
+				TopicId:     topicId,
+				BlockHeight: blockHeight,
+				Inferer:     inferer3,
+				Value:       alloraMath.MustNewDecFromString("20.0"),
 			},
 		},
 	}
 
 	nonce := emissionstypes.Nonce{BlockHeight: blockHeight}
-	err := keeper.InsertInferences(s.ctx, topicId, nonce, inferences)
+	err := keeper.InsertActiveInferences(s.ctx, topicId, nonce.BlockHeight, inferences)
 	s.Require().NoError(err)
 
-	valueBundle, _, _, _, _, _, err := inferencesynthesis.GetNetworkInferences(s.ctx, keeper, topicId, &blockHeight)
+	result, err := inferencesynthesis.GetNetworkInferences(s.ctx, keeper, topicId, &blockHeight)
 	s.Require().NoError(err)
+	valueBundle := result.NetworkInferences
 
 	expectedMedian := alloraMath.MustNewDecFromString("20.0")
 	s.Require().True(expectedMedian.Equal(valueBundle.CombinedValue), "The combined value should be the median of the inferences")

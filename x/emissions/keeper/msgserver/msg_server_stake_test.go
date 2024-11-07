@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cometbft/cometbft/crypto/secp256k1"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 
 	cosmosMath "cosmossdk.io/math"
@@ -18,22 +19,23 @@ import (
 func (s *MsgServerTestSuite) commonStakingSetup(
 	ctx sdk.Context,
 	reputer string,
+	reputerAddr sdk.AccAddress,
 	worker string,
+	workerAddr sdk.AccAddress,
 	reputerInitialBalanceUint cosmosMath.Int,
 ) uint64 {
-	workerAddr := sdk.MustAccAddressFromBech32(worker)
-	reputerAddr := sdk.MustAccAddressFromBech32(reputer)
 	msgServer := s.msgServer
 	require := s.Require()
 
 	// Create Topic
-	newTopicMsg := &types.MsgCreateNewTopic{
-		Creator:                  reputerAddr.String(),
+	newTopicMsg := &types.CreateNewTopicRequest{
+		Creator:                  reputer,
 		Metadata:                 "Some metadata for the new topic",
 		LossMethod:               "mse",
 		EpochLength:              10800,
 		GroundTruthLag:           10800,
 		WorkerSubmissionWindow:   10,
+		AllowNegative:            false,
 		AlphaRegret:              alloraMath.NewDecFromInt64(1),
 		PNorm:                    alloraMath.NewDecFromInt64(3),
 		Epsilon:                  alloraMath.MustNewDecFromString("0.01"),
@@ -57,9 +59,9 @@ func (s *MsgServerTestSuite) commonStakingSetup(
 	topicId := response.TopicId
 
 	// Register Reputer
-	reputerRegMsg := &types.MsgRegister{
-		Sender:    reputerAddr.String(),
-		Owner:     reputerAddr.String(),
+	reputerRegMsg := &types.RegisterRequest{
+		Sender:    reputer,
+		Owner:     reputer,
 		TopicId:   topicId,
 		IsReputer: true,
 	}
@@ -76,10 +78,11 @@ func (s *MsgServerTestSuite) commonStakingSetup(
 	require.NoError(err, "Sending coins should not return an error")
 
 	// Register Worker
-	workerRegMsg := &types.MsgRegister{
-		Sender:  workerAddr.String(),
-		Owner:   workerAddr.String(),
-		TopicId: topicId,
+	workerRegMsg := &types.RegisterRequest{
+		Sender:    worker,
+		Owner:     worker,
+		TopicId:   topicId,
+		IsReputer: false,
 	}
 	_, err = msgServer.Register(ctx, workerRegMsg)
 	require.NoError(err, "Registering worker should not return an error")
@@ -91,22 +94,24 @@ func (s *MsgServerTestSuite) TestMsgAddStake() {
 	ctx := s.ctx
 	require := s.Require()
 
-	reputerAddr := sdk.AccAddress(PKS[0].Address()).String() // delegator
-	workerAddr := sdk.AccAddress(PKS[1].Address()).String()  // target
+	reputer := s.addrsStr[0]
+	reputerAddr := s.addrs[0]
+	worker := s.addrsStr[1]
+	workerAddr := s.addrs[1]
 	stakeAmount := cosmosMath.NewInt(10)
 	moduleParams, err := s.emissionsKeeper.GetParams(ctx)
 	require.NoError(err)
 	registrationInitialBalance := moduleParams.RegistrationFee.Add(stakeAmount)
 
-	topicId := s.commonStakingSetup(ctx, reputerAddr, workerAddr, registrationInitialBalance)
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 
-	addStakeMsg := &types.MsgAddStake{
-		Sender:  reputerAddr,
+	addStakeMsg := &types.AddStakeRequest{
+		Sender:  reputer,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	}
 
-	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr)
+	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputer)
 	require.NoError(err)
 	require.Equal(cosmosMath.ZeroInt(), reputerStake, "Stake amount mismatch")
 
@@ -118,7 +123,7 @@ func (s *MsgServerTestSuite) TestMsgAddStake() {
 	require.NoError(err, "AddStake should not return an error")
 	require.NotNil(response)
 
-	reputerStake, err = s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr)
+	reputerStake, err = s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputer)
 	require.NoError(err)
 	require.Equal(stakeAmount, reputerStake, "Stake amount mismatch")
 
@@ -132,19 +137,20 @@ func (s *MsgServerTestSuite) TestStartRemoveStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := uint64(123)
+	senderAddr := s.addrs[0]
+	sender := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 
 	s.MintTokensToAddress(senderAddr, cosmosMath.NewInt(1000))
 
 	// Assuming you have methods to directly manipulate the state
 	// Simulate that sender has already staked the required amount
-	err := s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr.String(), stakeAmount)
+	err := s.emissionsKeeper.AddReputerStake(ctx, topicId, sender, stakeAmount)
 	require.NoError(err)
 
-	msg := &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	msg := &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	}
@@ -165,7 +171,7 @@ func (s *MsgServerTestSuite) TestStartRemoveStake() {
 
 	expected := types.StakeRemovalInfo{
 		TopicId:               topicId,
-		Reputer:               senderAddr.String(),
+		Reputer:               sender,
 		Amount:                stakeAmount,
 		BlockRemovalStarted:   ctx.BlockHeight(),
 		BlockRemovalCompleted: expectedUnstake,
@@ -177,12 +183,12 @@ func (s *MsgServerTestSuite) TestStartRemoveStakeInsufficientStake() {
 	ctx := s.ctx
 	require := s.Require()
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := uint64(123)
+	sender := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 
-	msg := &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	msg := &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	}
@@ -204,8 +210,9 @@ func (s *MsgServerTestSuite) TestConfirmRemoveStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := uint64(123)
+	senderAddr := s.addrs[0]
+	sender := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	startBlock := sdkCtx.BlockHeight()
@@ -216,7 +223,7 @@ func (s *MsgServerTestSuite) TestConfirmRemoveStake() {
 
 	s.MintTokensToAddress(senderAddr, cosmosMath.NewInt(1000))
 	s.MintTokensToModule(types.AlloraStakingAccountName, cosmosMath.NewInt(1000))
-	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr.String(), stakeAmount)
+	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, sender, stakeAmount)
 	require.NoError(err)
 	blockEnd := startBlock + removalDelay
 
@@ -255,8 +262,8 @@ func (s *MsgServerTestSuite) TestStartRemoveStakeTwiceInSameBlock() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := uint64(123)
+	sender := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	startBlock := sdkCtx.BlockHeight()
@@ -268,11 +275,11 @@ func (s *MsgServerTestSuite) TestStartRemoveStakeTwiceInSameBlock() {
 	removeBlock := startBlock + removalDelay
 
 	// Simulate that sender has already staked the required amount
-	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr.String(), stakeAmount)
+	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, sender, stakeAmount)
 	require.NoError(err)
 
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	})
@@ -285,7 +292,7 @@ func (s *MsgServerTestSuite) TestStartRemoveStakeTwiceInSameBlock() {
 
 	expected := types.StakeRemovalInfo{
 		TopicId:               topicId,
-		Reputer:               senderAddr.String(),
+		Reputer:               sender,
 		Amount:                stakeAmount,
 		BlockRemovalStarted:   startBlock,
 		BlockRemovalCompleted: removeBlock,
@@ -293,8 +300,8 @@ func (s *MsgServerTestSuite) TestStartRemoveStakeTwiceInSameBlock() {
 	require.Equal(expected, stakePlacements[0])
 
 	newStake := stakeAmount.SubRaw(10)
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  newStake,
 	})
@@ -319,8 +326,8 @@ func (s *MsgServerTestSuite) TestRemoveStakeTwiceInDifferentBlocks() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := uint64(123)
+	sender := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	startBlock := sdkCtx.BlockHeight()
@@ -332,11 +339,11 @@ func (s *MsgServerTestSuite) TestRemoveStakeTwiceInDifferentBlocks() {
 	removeBlock := startBlock + removalDelay
 
 	// Simulate that sender has already staked the required amount
-	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr.String(), stakeAmount)
+	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, sender, stakeAmount)
 	require.NoError(err)
 
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	})
@@ -349,7 +356,7 @@ func (s *MsgServerTestSuite) TestRemoveStakeTwiceInDifferentBlocks() {
 
 	expected := types.StakeRemovalInfo{
 		TopicId:               topicId,
-		Reputer:               senderAddr.String(),
+		Reputer:               sender,
 		Amount:                stakeAmount,
 		BlockRemovalStarted:   startBlock,
 		BlockRemovalCompleted: removeBlock,
@@ -360,8 +367,8 @@ func (s *MsgServerTestSuite) TestRemoveStakeTwiceInDifferentBlocks() {
 	newRemoveBlock := newStartBlock + removalDelay
 	newStake := stakeAmount.SubRaw(10)
 	ctx = ctx.WithBlockHeight(newStartBlock)
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
-		Sender:  senderAddr.String(),
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
 		Amount:  newStake,
 	})
@@ -385,9 +392,9 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 	ctx := s.ctx
 	require := s.Require()
 	keeper := s.emissionsKeeper
-	senderAddr1 := sdk.AccAddress(PKS[0].Address())
-	senderAddr2 := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(123)
+	senderAddr1 := s.addrs[0]
+	senderAddr2 := s.addrs[1]
+	topic := s.CreateOneTopic()
 	stakeAmount1 := cosmosMath.NewInt(50)
 	stakeAmount2 := cosmosMath.NewInt(30)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -398,11 +405,11 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 	removalDelay := params.RemoveStakeDelayWindow
 	removeBlock := startBlock + removalDelay
 	// Simulate that sender1 has already staked the required amount
-	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr1.String(), stakeAmount1)
+	err = s.emissionsKeeper.AddReputerStake(ctx, topic.Id, senderAddr1.String(), stakeAmount1)
 	require.NoError(err)
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
 		Sender:  senderAddr1.String(),
-		TopicId: topicId,
+		TopicId: topic.Id,
 		Amount:  stakeAmount1,
 	})
 	s.Require().NoError(err)
@@ -411,7 +418,7 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 	require.Len(stakePlacements1, 1)
 	require.False(limitHit)
 	expected1 := types.StakeRemovalInfo{
-		TopicId:               topicId,
+		TopicId:               topic.Id,
 		Reputer:               senderAddr1.String(),
 		Amount:                stakeAmount1,
 		BlockRemovalStarted:   startBlock,
@@ -419,11 +426,11 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 	}
 	require.Equal(expected1, stakePlacements1[0])
 	// Simulate that sender2 has already staked the required amount
-	err = s.emissionsKeeper.AddReputerStake(ctx, topicId, senderAddr2.String(), stakeAmount2)
+	err = s.emissionsKeeper.AddReputerStake(ctx, topic.Id, senderAddr2.String(), stakeAmount2)
 	require.NoError(err)
-	_, err = s.msgServer.RemoveStake(ctx, &types.MsgRemoveStake{
+	_, err = s.msgServer.RemoveStake(ctx, &types.RemoveStakeRequest{
 		Sender:  senderAddr2.String(),
-		TopicId: topicId,
+		TopicId: topic.Id,
 		Amount:  stakeAmount2,
 	})
 	s.Require().NoError(err)
@@ -432,7 +439,7 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 	require.Len(stakePlacements2, 2)
 	require.False(limitHit)
 	expected2 := types.StakeRemovalInfo{
-		TopicId:               topicId,
+		TopicId:               topic.Id,
 		Reputer:               senderAddr2.String(),
 		Amount:                stakeAmount2,
 		BlockRemovalStarted:   startBlock,
@@ -445,9 +452,9 @@ func (s *MsgServerTestSuite) TestRemoveMultipleReputersSameBlock() {
 func (s *MsgServerTestSuite) TestStartRemoveStakeNegative() {
 	ctx := s.ctx
 	require := s.Require()
-	senderAddr := sdk.AccAddress(PKS[0].Address())
+	senderAddr := s.addrs[0]
 
-	msg := &types.MsgRemoveStake{
+	msg := &types.RemoveStakeRequest{
 		Sender:  senderAddr.String(),
 		TopicId: uint64(123),
 		Amount:  cosmosMath.NewInt(-1),
@@ -462,32 +469,33 @@ func (s *MsgServerTestSuite) TestDelegateStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[7],
+		NodeAddress: reputer,
 	}
 
-	err := keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
+	err := keeper.InsertReputer(ctx, topic.Id, reputer, reputerInfo)
 	require.NoError(err)
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	}
 
-	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr.String())
+	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topic.Id, reputer)
 	require.NoError(err)
 	require.Equal(cosmosMath.ZeroInt(), reputerStake, "Stake amount mismatch")
 
-	amount0, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputerAddr.String())
+	amount0, err := keeper.GetDelegateStakePlacement(ctx, topic.Id, delegator, reputer)
 	require.NoError(err)
 	require.Equal(alloraMath.NewDecFromInt64(0), amount0.Amount)
 
@@ -496,11 +504,11 @@ func (s *MsgServerTestSuite) TestDelegateStake() {
 	require.NoError(err)
 	require.NotNil(response, "Response should not be nil after successful delegation")
 
-	reputerStake, err = s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr.String())
+	reputerStake, err = s.emissionsKeeper.GetStakeReputerAuthority(ctx, topic.Id, reputer)
 	require.NoError(err)
 	require.Equal(stakeAmount, reputerStake, "Stake amount mismatch")
 
-	amount1, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputerAddr.String())
+	amount1, err := keeper.GetDelegateStakePlacement(ctx, topic.Id, delegator, reputer)
 	require.NoError(err)
 	amountInt, err := amount1.Amount.SdkIntTrim()
 	require.NoError(err)
@@ -512,21 +520,21 @@ func (s *MsgServerTestSuite) TestReputerCantSelfDelegateStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[1].Address())
+	delegatorAddr := s.addrs[0]
 	reputerAddr := delegatorAddr
-	topicId := uint64(123)
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[0],
+		NodeAddress: s.addrsStr[0],
 	}
 
 	err := keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
 	require.NoError(err)
 
-	msg := &types.MsgDelegateStake{
+	msg := &types.DelegateStakeRequest{
 		Sender:  delegatorAddr.String(),
 		TopicId: topicId,
 		Reputer: reputerAddr.String(),
@@ -543,24 +551,26 @@ func (s *MsgServerTestSuite) TestDelegateeCantWithdrawDelegatedStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputerAddr := s.addrs[1]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[0],
+		NodeAddress: s.addrsStr[0],
 	}
 
-	err := keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
+	err := keeper.InsertReputer(ctx, topic.Id, reputerAddr.String(), reputerInfo)
 	require.NoError(err)
 
-	delegateStakeMsg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	delegateStakeMsg := &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	}
 
@@ -568,20 +578,20 @@ func (s *MsgServerTestSuite) TestDelegateeCantWithdrawDelegatedStake() {
 	require.NoError(err)
 	require.NotNil(response, "Response should not be nil after successful delegation")
 
-	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr.String())
+	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topic.Id, reputer)
 	require.NoError(err)
 	require.Equal(stakeAmount, reputerStake, "Stake amount mismatch")
 
-	amount1, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputerAddr.String())
+	amount1, err := keeper.GetDelegateStakePlacement(ctx, topic.Id, delegator, reputer)
 	require.NoError(err)
 	amountInt, err := amount1.Amount.SdkIntTrim()
 	require.NoError(err)
 	require.Equal(stakeAmount, amountInt)
 
 	// Attempt to withdraw the delegated stake
-	removeMsg := &types.MsgRemoveStake{
-		Sender:  reputerAddr.String(),
-		TopicId: topicId,
+	removeMsg := &types.RemoveStakeRequest{
+		Sender:  reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	}
 
@@ -593,17 +603,17 @@ func (s *MsgServerTestSuite) TestDelegateStakeUnregisteredReputer() {
 	ctx := s.ctx
 	require := s.Require()
 
-	senderAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := uint64(123)
+	sender := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topicId := s.CreateOneTopic().Id
 	stakeAmount := cosmosMath.NewInt(50)
 
 	// Do not register the reputer to simulate failure case
 
-	msg := &types.MsgDelegateStake{
-		Sender:  senderAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  sender,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	}
 
@@ -619,28 +629,29 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	moduleParams, err := keeper.GetParams(ctx)
 	require.NoError(err)
 	removalDelay := moduleParams.RemoveStakeDelayWindow
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[0],
+		NodeAddress: reputer,
 	}
 
-	err = keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
+	err = keeper.InsertReputer(ctx, topic.Id, reputer, reputerInfo)
 	require.NoError(err)
 
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	}
 
@@ -650,10 +661,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStake() {
 	require.NotNil(response, "Response should not be nil after successful delegation")
 
 	// Perform the stake removal initiation
-	msg2 := &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	msg2 := &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	}
 	response2, err := s.msgServer.RemoveDelegateStake(ctx, msg2)
@@ -674,25 +685,26 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeError() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[0],
+		NodeAddress: s.addrsStr[0],
 	}
 
-	err := keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
+	err := keeper.InsertReputer(ctx, topic.Id, reputer, reputerInfo)
 	require.NoError(err)
 
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	}
 
@@ -701,10 +713,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeError() {
 	require.NoError(err)
 	require.NotNil(response, "Response should not be nil after successful delegation")
 
-	msg2 := &types.MsgRemoveDelegateStake{
+	msg2 := &types.RemoveDelegateStakeRequest{
 		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount.Mul(cosmosMath.NewInt(2)),
 	}
 
@@ -718,9 +730,10 @@ func (s *MsgServerTestSuite) TestConfirmRemoveDelegateStake() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -734,22 +747,25 @@ func (s *MsgServerTestSuite) TestConfirmRemoveDelegateStake() {
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	// Simulate adding a reputer and delegating stake to them
-	err = keeper.InsertReputer(ctx, topicId, reputerAddr.String(), types.OffchainNode{})
+	err = keeper.InsertReputer(ctx, topic.Id, reputer, types.OffchainNode{
+		Owner:       s.addrsStr[0],
+		NodeAddress: reputer,
+	})
 	require.NoError(err)
 
-	_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
 
 	// Start removing the delegated stake
-	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
@@ -762,7 +778,7 @@ func (s *MsgServerTestSuite) TestConfirmRemoveDelegateStake() {
 	require.NoError(err)
 
 	// Check that the stake was actually removed
-	delegateStakePlaced, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputerAddr.String())
+	delegateStakePlaced, err := keeper.GetDelegateStakePlacement(ctx, topic.Id, delegator, reputer)
 	require.NoError(err)
 	require.True(delegateStakePlaced.Amount.IsZero(), "Delegate stake should be zero after successful removal")
 
@@ -780,9 +796,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwiceSameBlock() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -796,29 +813,32 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwiceSameBlock() {
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	// Simulate adding a reputer and delegating stake to them
-	err = keeper.InsertReputer(ctx, topicId, reputerAddr.String(), types.OffchainNode{})
+	err = keeper.InsertReputer(ctx, topic.Id, reputer, types.OffchainNode{
+		Owner:       s.addrsStr[0],
+		NodeAddress: reputer,
+	})
 	require.NoError(err)
-	_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
 
 	// Start removing the delegated stake
-	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
 
 	expected := types.DelegateStakeRemovalInfo{
-		TopicId:               topicId,
-		Delegator:             delegatorAddr.String(),
-		Reputer:               reputerAddr.String(),
+		TopicId:               topic.Id,
+		Delegator:             delegator,
+		Reputer:               reputer,
 		Amount:                stakeAmount,
 		BlockRemovalStarted:   startBlock,
 		BlockRemovalCompleted: endBlock,
@@ -832,10 +852,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwiceSameBlock() {
 
 	// Start removing the delegated stake again
 	newStakeAmount := stakeAmount.SubRaw(10)
-	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
+	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
 		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  newStakeAmount,
 	})
 	require.NoError(err)
@@ -853,9 +873,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwice() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -869,29 +890,32 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwice() {
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
 	// Simulate adding a reputer and delegating stake to them
-	err = keeper.InsertReputer(ctx, topicId, reputerAddr.String(), types.OffchainNode{})
+	err = keeper.InsertReputer(ctx, topic.Id, reputer, types.OffchainNode{
+		Owner:       s.addrsStr[0],
+		NodeAddress: reputer,
+	})
 	require.NoError(err)
-	_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+	_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
+		Sender:  delegator,
+		TopicId: topic.Id,
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
 
 	// Start removing the delegated stake
-	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	})
 	require.NoError(err)
 
 	expected := types.DelegateStakeRemovalInfo{
-		TopicId:               topicId,
-		Delegator:             delegatorAddr.String(),
-		Reputer:               reputerAddr.String(),
+		TopicId:               topic.Id,
+		Delegator:             delegator,
+		Reputer:               reputer,
 		Amount:                stakeAmount,
 		BlockRemovalStarted:   startBlock,
 		BlockRemovalCompleted: endBlock,
@@ -909,10 +933,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeTwice() {
 	ctx = ctx.WithBlockHeight(newStartBlock)
 	// Start removing the delegated stake again
 	newStakeAmount := stakeAmount.SubRaw(10)
-	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  newStakeAmount,
 	})
 	require.NoError(err)
@@ -938,25 +962,26 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeNegative() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 
 	reputerInfo := types.OffchainNode{
-		Owner:       "reputer-owner-sample",
-		NodeAddress: "reputer-node-address-sample",
+		Owner:       s.addrsStr[7],
+		NodeAddress: reputer,
 	}
 
-	err := keeper.InsertReputer(ctx, topicId, reputerAddr.String(), reputerInfo)
+	err := keeper.InsertReputer(ctx, topic.Id, reputer, reputerInfo)
 	require.NoError(err)
 
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  stakeAmount,
 	}
 
@@ -965,10 +990,10 @@ func (s *MsgServerTestSuite) TestStartRemoveDelegateStakeNegative() {
 	require.NoError(err)
 	require.NotNil(response, "Response should not be nil after successful delegation")
 
-	msg2 := &types.MsgRemoveDelegateStake{
-		Sender:  delegatorAddr.String(),
-		Reputer: reputerAddr.String(),
-		TopicId: topicId,
+	msg2 := &types.RemoveDelegateStakeRequest{
+		Sender:  delegator,
+		Reputer: reputer,
+		TopicId: topic.Id,
 		Amount:  cosmosMath.NewInt(-1),
 	}
 
@@ -981,8 +1006,8 @@ func (s *MsgServerTestSuite) TestRemoveDelegateStakeMultipleReputersSameDelegato
 	ctx := s.ctx
 	require := s.Require()
 	keeper := s.emissionsKeeper
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := s.CreateOneTopic()
+	delegatorAddr := s.addrs[0]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	startBlock := sdkCtx.BlockHeight()
@@ -993,27 +1018,31 @@ func (s *MsgServerTestSuite) TestRemoveDelegateStakeMultipleReputersSameDelegato
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 	// Simulate adding multiple reputers and delegating stake to them
 	reputers := []sdk.AccAddress{
-		sdk.AccAddress(PKS[1].Address()),
-		sdk.AccAddress(PKS[2].Address()),
-		sdk.AccAddress(PKS[3].Address()),
+		s.addrs[1],
+		s.addrs[2],
+		s.addrs[3],
 	}
 	for _, reputer := range reputers {
-		err := keeper.InsertReputer(ctx, topicId, reputer.String(), types.OffchainNode{})
+		reputerAddr := reputer.String()
+		err := keeper.InsertReputer(ctx, topic.Id, reputerAddr, types.OffchainNode{
+			Owner:       s.addrsStr[0],
+			NodeAddress: reputerAddr,
+		})
 		require.NoError(err)
-		_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
+		_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
 			Sender:  delegatorAddr.String(),
-			TopicId: topicId,
-			Reputer: reputer.String(),
+			TopicId: topic.Id,
+			Reputer: reputerAddr,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
 	}
 	// Start removing the delegated stake for each reputer
 	for _, reputer := range reputers {
-		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
+		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
 			Sender:  delegatorAddr.String(),
 			Reputer: reputer.String(),
-			TopicId: topicId,
+			TopicId: topic.Id,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
@@ -1025,7 +1054,7 @@ func (s *MsgServerTestSuite) TestRemoveDelegateStakeMultipleReputersSameDelegato
 	require.NoError(err)
 	// Check that the stake was actually removed for each reputer
 	for _, reputer := range reputers {
-		delegateStakePlaced, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputer.String())
+		delegateStakePlaced, err := keeper.GetDelegateStakePlacement(ctx, topic.Id, delegatorAddr.String(), reputer.String())
 		require.NoError(err)
 		require.True(delegateStakePlaced.Amount.IsZero(), "Delegate stake should be zero after successful removal")
 	}
@@ -1040,8 +1069,9 @@ func (s *MsgServerTestSuite) TestRemoveOneDelegateMultipleTargetsDifferentBlocks
 	ctx := s.ctx
 	require := s.Require()
 	keeper := s.emissionsKeeper
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	topicId := s.CreateOneTopic()
+	delegator := s.addrsStr[0]
+	delegatorAddr := s.addrs[0]
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params, err := keeper.GetParams(ctx)
@@ -1052,27 +1082,31 @@ func (s *MsgServerTestSuite) TestRemoveOneDelegateMultipleTargetsDifferentBlocks
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000))
 	// Simulate adding multiple reputers and delegating stake to them
 	reputers := []sdk.AccAddress{
-		sdk.AccAddress(PKS[1].Address()),
-		sdk.AccAddress(PKS[2].Address()),
-		sdk.AccAddress(PKS[3].Address()),
+		s.addrs[1],
+		s.addrs[2],
+		s.addrs[3],
 	}
 	for _, reputer := range reputers {
-		err := keeper.InsertReputer(ctx, topicId, reputer.String(), types.OffchainNode{})
+		reputerStr := reputer.String()
+		err := keeper.InsertReputer(ctx, topic.Id, reputerStr, types.OffchainNode{
+			Owner:       s.addrsStr[0],
+			NodeAddress: reputerStr,
+		})
 		require.NoError(err)
-		_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
-			Sender:  delegatorAddr.String(),
-			TopicId: topicId,
-			Reputer: reputer.String(),
+		_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
+			Sender:  delegator,
+			TopicId: topic.Id,
+			Reputer: reputerStr,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
 	}
 	// Start removing the delegated stake for each reputer
 	for _, reputer := range reputers {
-		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
-			Sender:  delegatorAddr.String(),
+		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
+			Sender:  delegator,
 			Reputer: reputer.String(),
-			TopicId: topicId,
+			TopicId: topic.Id,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
@@ -1103,8 +1137,8 @@ func (s *MsgServerTestSuite) TestRemoveOneDelegateMultipleTargetsDifferentBlocks
 	for _, reputer := range reputers {
 		delegateStakePlaced, err := keeper.GetDelegateStakePlacement(
 			ctx,
-			topicId,
-			delegatorAddr.String(),
+			topic.Id,
+			delegator,
 			reputer.String(),
 		)
 		require.NoError(err)
@@ -1122,11 +1156,11 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesSameTargetSameBlock() {
 	require := s.Require()
 	keeper := s.emissionsKeeper
 	delegators := []sdk.AccAddress{
-		sdk.AccAddress(PKS[0].Address()),
-		sdk.AccAddress(PKS[1].Address()),
-		sdk.AccAddress(PKS[2].Address()),
+		s.addrs[0],
+		s.addrs[1],
+		s.addrs[2],
 	}
-	topicId := s.CreateOneTopic()
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params, err := keeper.GetParams(ctx)
@@ -1138,13 +1172,16 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesSameTargetSameBlock() {
 		s.MintTokensToAddress(delegator, cosmosMath.NewInt(1000))
 	}
 	// Simulate adding multiple reputers and delegating stake to them
-	reputer := sdk.AccAddress(PKS[3].Address())
-	err = keeper.InsertReputer(ctx, topicId, reputer.String(), types.OffchainNode{})
+	reputer := s.addrs[3]
+	err = keeper.InsertReputer(ctx, topic.Id, reputer.String(), types.OffchainNode{
+		Owner:       s.addrsStr[0],
+		NodeAddress: reputer.String(),
+	})
 	require.NoError(err)
 	for _, delegator := range delegators {
-		_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
+		_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
 			Sender:  delegator.String(),
-			TopicId: topicId,
+			TopicId: topic.Id,
 			Reputer: reputer.String(),
 			Amount:  stakeAmount,
 		})
@@ -1152,10 +1189,10 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesSameTargetSameBlock() {
 	}
 	// Start removing the delegated stake for each reputer
 	for _, delegator := range delegators {
-		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
+		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
 			Sender:  delegator.String(),
 			Reputer: reputer.String(),
-			TopicId: topicId,
+			TopicId: topic.Id,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
@@ -1184,7 +1221,7 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesSameTargetSameBlock() {
 	for _, delegator := range delegators {
 		delegateStakePlaced, err := keeper.GetDelegateStakePlacement(
 			ctx,
-			topicId,
+			topic.Id,
 			delegator.String(),
 			reputer.String(),
 		)
@@ -1203,10 +1240,10 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesDifferentTargetsSameBloc
 	require := s.Require()
 	keeper := s.emissionsKeeper
 	delegators := []sdk.AccAddress{
-		sdk.AccAddress(PKS[0].Address()),
-		sdk.AccAddress(PKS[1].Address()),
+		s.addrs[0],
+		s.addrs[1],
 	}
-	topicId := s.CreateOneTopic()
+	topic := s.CreateOneTopic()
 	stakeAmount := cosmosMath.NewInt(50)
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params, err := keeper.GetParams(ctx)
@@ -1218,26 +1255,31 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesDifferentTargetsSameBloc
 	s.MintTokensToAddress(delegators[1], cosmosMath.NewInt(1000))
 	// Simulate adding multiple reputers and delegating stake to them
 	reputers := []sdk.AccAddress{
-		sdk.AccAddress(PKS[2].Address()),
-		sdk.AccAddress(PKS[3].Address()),
+		s.addrs[2],
+		s.addrs[3],
 	}
 	for i := 0; i < len(delegators); i++ {
-		err := keeper.InsertReputer(ctx, topicId, reputers[i].String(), types.OffchainNode{})
+		reputerAddr := reputers[i].String()
+		delegatorAddr := delegators[i].String()
+		err := keeper.InsertReputer(ctx, topic.Id, reputerAddr, types.OffchainNode{
+			Owner:       s.addrsStr[0],
+			NodeAddress: reputerAddr,
+		})
 		require.NoError(err)
-		_, err = s.msgServer.DelegateStake(ctx, &types.MsgDelegateStake{
-			Sender:  delegators[i].String(),
-			TopicId: topicId,
-			Reputer: reputers[i].String(),
+		_, err = s.msgServer.DelegateStake(ctx, &types.DelegateStakeRequest{
+			Sender:  delegatorAddr,
+			TopicId: topic.Id,
+			Reputer: reputerAddr,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
 	}
 	// Start removing the delegated stake for each reputer
 	for i := 0; i < len(delegators); i++ {
-		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.MsgRemoveDelegateStake{
+		_, err = s.msgServer.RemoveDelegateStake(ctx, &types.RemoveDelegateStakeRequest{
 			Sender:  delegators[i].String(),
 			Reputer: reputers[i].String(),
-			TopicId: topicId,
+			TopicId: topic.Id,
 			Amount:  stakeAmount,
 		})
 		require.NoError(err)
@@ -1266,7 +1308,7 @@ func (s *MsgServerTestSuite) TestRemoveMultipleDelegatesDifferentTargetsSameBloc
 	for i := 0; i < len(reputers); i++ {
 		delegateStakePlaced, err := keeper.GetDelegateStakePlacement(
 			ctx,
-			topicId,
+			topic.Id,
 			delegators[i].String(),
 			reputers[i].String(),
 		)
@@ -1288,23 +1330,27 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	newBlock := int64(1004)
 	score := alloraMath.MustNewDecFromString("17.53436")
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	workerAddr := sdk.AccAddress(PKS[2].Address()) // target
-	delegator2Addr := sdk.AccAddress(PKS[3].Address())
+	delegator := s.addrsStr[0]
+	delegatorAddr := s.addrs[0]
+	reputer := s.addrsStr[1]
+	reputerAddr := s.addrs[1]
+	worker := s.addrsStr[2]
+	workerAddr := s.addrs[2]
+	delegator2 := s.addrsStr[3]
+	delegator2Addr := s.addrs[3]
 	stakeAmount := cosmosMath.NewInt(500000)
 	registrationInitialBalance := cosmosMath.NewInt(1000)
 	delegatorStakeAmount := cosmosMath.NewInt(500)
 	delegatorStakeAmount2 := cosmosMath.NewInt(500)
 	delegator2StakeAmount := cosmosMath.NewInt(5000)
 
-	topicId := s.commonStakingSetup(ctx, reputerAddr.String(), workerAddr.String(), registrationInitialBalance)
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 	s.MintTokensToAddress(reputerAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(delegator2Addr, cosmosMath.NewInt(1000000))
 
-	addStakeMsg := &types.MsgAddStake{
-		Sender:  reputerAddr.String(),
+	addStakeMsg := &types.AddStakeRequest{
+		Sender:  reputer,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	}
@@ -1313,25 +1359,25 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	require.NoError(err, "AddStake should not return an error")
 	require.NotNil(response)
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  delegatorStakeAmount,
 	}
 
-	msg2 := &types.MsgDelegateStake{
-		Sender:  delegator2Addr.String(),
+	msg2 := &types.DelegateStakeRequest{
+		Sender:  delegator2,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  delegator2StakeAmount,
 	}
 
-	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr.String())
+	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputer)
 	require.NoError(err)
 	require.Equal(stakeAmount, reputerStake, "Stake amount mismatch")
 
-	amount0, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegatorAddr.String(), reputerAddr.String())
+	amount0, err := keeper.GetDelegateStakePlacement(ctx, topicId, delegator, reputer)
 	require.NoError(err)
 	require.Equal(alloraMath.NewDecFromInt64(0), amount0.Amount)
 
@@ -1348,22 +1394,33 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	scoreToAdd := types.Score{
 		TopicId:     topicId,
 		BlockHeight: block,
-		Address:     reputerAddr.String(),
+		Address:     reputer,
 		Score:       score,
 	}
 	err = s.emissionsKeeper.InsertReputerScore(s.ctx, topicId, block, scoreToAdd)
 	s.Require().NoError(err)
 
 	reputerValueBundle := &types.ReputerValueBundle{
+		Pubkey: s.pubKeyHexStr[1],
 		ValueBundle: &types.ValueBundle{
-			TopicId:       topicId,
-			Reputer:       reputerAddr.String(),
-			CombinedValue: alloraMath.MustNewDecFromString("1500.0"),
-			NaiveValue:    alloraMath.MustNewDecFromString("1500.0"),
+			TopicId:                       topicId,
+			ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: block}},
+			Reputer:                       reputer,
+			ExtraData:                     nil,
+			CombinedValue:                 alloraMath.MustNewDecFromString("1500.0"),
+			InfererValues:                 nil,
+			ForecasterValues:              nil,
+			NaiveValue:                    alloraMath.MustNewDecFromString("1500.0"),
+			OneOutInfererValues:           nil,
+			OneOutForecasterValues:        nil,
+			OneInForecasterValues:         nil,
+			OneOutInfererForecasterValues: nil,
 		},
+		Signature: []byte{},
 	}
 	reputerValueBundles.ReputerValueBundles = append(reputerValueBundles.ReputerValueBundles, reputerValueBundle)
-	_ = s.emissionsKeeper.InsertReputerLossBundlesAtBlock(s.ctx, topicId, block, reputerValueBundles)
+	err = s.emissionsKeeper.InsertActiveReputerLosses(s.ctx, topicId, block, reputerValueBundles)
+	s.Require().NoError(err)
 
 	// Calculate and Set the reputer scores
 	scores, err := rewards.GenerateReputerScores(s.ctx, s.emissionsKeeper, topicId, block, reputerValueBundles)
@@ -1389,10 +1446,10 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	s.Require().NoError(err)
 	s.Require().Equal(1, len(reputerRewards))
 
-	msg3 := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
+	msg3 := &types.DelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  delegatorStakeAmount2,
 	}
 
@@ -1404,7 +1461,7 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	newScoreToAdd := types.Score{
 		TopicId:     topicId,
 		BlockHeight: newBlock,
-		Address:     reputerAddr.String(),
+		Address:     reputer,
 		Score:       score,
 	}
 	err = s.emissionsKeeper.InsertReputerScore(s.ctx, topicId, newBlock, newScoreToAdd)
@@ -1412,14 +1469,25 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 
 	newReputerValueBundle := &types.ReputerValueBundle{
 		ValueBundle: &types.ValueBundle{
-			TopicId:       topicId,
-			Reputer:       reputerAddr.String(),
-			CombinedValue: alloraMath.MustNewDecFromString("1500.0"),
-			NaiveValue:    alloraMath.MustNewDecFromString("1500.0"),
+			TopicId:                       topicId,
+			ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: newBlock}},
+			Reputer:                       reputer,
+			ExtraData:                     nil,
+			CombinedValue:                 alloraMath.MustNewDecFromString("1500.0"),
+			InfererValues:                 nil,
+			ForecasterValues:              nil,
+			NaiveValue:                    alloraMath.MustNewDecFromString("1500.0"),
+			OneOutInfererValues:           nil,
+			OneOutForecasterValues:        nil,
+			OneInForecasterValues:         nil,
+			OneOutInfererForecasterValues: nil,
 		},
+		Signature: []byte{},
+		Pubkey:    s.pubKeyHexStr[1],
 	}
 	newReputerValueBundles.ReputerValueBundles = append(newReputerValueBundles.ReputerValueBundles, newReputerValueBundle)
-	_ = s.emissionsKeeper.InsertReputerLossBundlesAtBlock(s.ctx, topicId, newBlock, newReputerValueBundles)
+	err = s.emissionsKeeper.InsertActiveReputerLosses(s.ctx, topicId, newBlock, newReputerValueBundles)
+	s.Require().NoError(err)
 
 	// Calculate and Set the reputer scores
 	scores, err = rewards.GenerateReputerScores(s.ctx, s.emissionsKeeper, topicId, block, reputerValueBundles)
@@ -1446,10 +1514,10 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	s.Require().Equal(1, len(newReputerRewards))
 
 	beforeBalance := s.bankKeeper.GetBalance(ctx, delegatorAddr, params.DefaultBondDenom)
-	rewardMsg := &types.MsgRewardDelegateStake{
-		Sender:  delegatorAddr.String(),
+	rewardMsg := &types.RewardDelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, rewardMsg)
 	afterBalance := s.bankKeeper.GetBalance(ctx, delegatorAddr, params.DefaultBondDenom)
@@ -1457,10 +1525,10 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 	s.Require().Greater(afterBalance.Amount.Uint64(), beforeBalance.Amount.Uint64(), "Balance must be increased")
 
 	beforeBalance2 := s.bankKeeper.GetBalance(ctx, delegator2Addr, params.DefaultBondDenom)
-	rewardMsg2 := &types.MsgRewardDelegateStake{
-		Sender:  delegator2Addr.String(),
+	rewardMsg2 := &types.RewardDelegateStakeRequest{
+		Sender:  delegator2,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, rewardMsg2)
 	afterBalance2 := s.bankKeeper.GetBalance(ctx, delegator2Addr, params.DefaultBondDenom)
@@ -1469,7 +1537,9 @@ func (s *MsgServerTestSuite) TestRewardDelegateStake() {
 }
 
 func (s *MsgServerTestSuite) insertValueBundlesAndGetRewards(
-	reputerAddr sdk.AccAddress,
+	reputerPrivKey secp256k1.PrivKey,
+	reputer string,
+	reputerPubKeyHex string,
 	topicId uint64,
 	block int64,
 	score alloraMath.Dec,
@@ -1479,22 +1549,33 @@ func (s *MsgServerTestSuite) insertValueBundlesAndGetRewards(
 	scoreToAdd := types.Score{
 		TopicId:     topicId,
 		BlockHeight: block,
-		Address:     reputerAddr.String(),
+		Address:     reputer,
 		Score:       score,
 	}
 	err := keeper.InsertReputerScore(s.ctx, topicId, block, scoreToAdd)
 	s.Require().NoError(err)
-
+	valueBundle := &types.ValueBundle{
+		TopicId:                       topicId,
+		ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: block}},
+		Reputer:                       reputer,
+		ExtraData:                     nil,
+		CombinedValue:                 alloraMath.MustNewDecFromString("1500.0"),
+		InfererValues:                 nil,
+		ForecasterValues:              nil,
+		NaiveValue:                    alloraMath.MustNewDecFromString("1500.0"),
+		OneOutInfererValues:           nil,
+		OneOutForecasterValues:        nil,
+		OneInForecasterValues:         nil,
+		OneOutInfererForecasterValues: nil,
+	}
+	signature := s.signValueBundle(valueBundle, reputerPrivKey)
 	reputerValueBundle := &types.ReputerValueBundle{
-		ValueBundle: &types.ValueBundle{
-			TopicId:       topicId,
-			Reputer:       reputerAddr.String(),
-			CombinedValue: alloraMath.MustNewDecFromString("1500.0"),
-			NaiveValue:    alloraMath.MustNewDecFromString("1500.0"),
-		},
+		ValueBundle: valueBundle,
+		Signature:   signature,
+		Pubkey:      reputerPubKeyHex,
 	}
 	reputerValueBundles.ReputerValueBundles = append(reputerValueBundles.ReputerValueBundles, reputerValueBundle)
-	err = keeper.InsertReputerLossBundlesAtBlock(s.ctx, topicId, block, reputerValueBundles)
+	err = keeper.InsertActiveReputerLosses(s.ctx, topicId, block, reputerValueBundles)
 	s.Require().NoError(err)
 
 	// Calculate and Set the reputer scores
@@ -1575,19 +1656,24 @@ func (s *MsgServerTestSuite) TestEqualStakeRewardsToDelegatorAndReputer() {
 	// newBlock := int64(1004)
 	score := alloraMath.MustNewDecFromString("17.53436")
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	workerAddr := sdk.AccAddress(PKS[2].Address()) // target
+	delegator := s.addrsStr[0]
+	delegatorAddr := s.addrs[0]
+	reputer := s.addrsStr[1]
+	reputerAddr := s.addrs[1]
+	reputerPubKeyHex := s.pubKeyHexStr[1]
+	reputerPrivKey := s.privKeys[1]
+	worker := s.addrsStr[2]
+	workerAddr := s.addrs[2]
 
 	registrationInitialBalance := cosmosMath.NewInt(1000)
 	stakeAmount := cosmosMath.NewInt(500000)
 
-	topicId := s.commonStakingSetup(ctx, reputerAddr.String(), workerAddr.String(), registrationInitialBalance)
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 	s.MintTokensToAddress(reputerAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000000))
 
-	addStakeMsg := &types.MsgAddStake{
-		Sender:  reputerAddr.String(),
+	addStakeMsg := &types.AddStakeRequest{
+		Sender:  reputer,
 		TopicId: topicId,
 		Amount:  stakeAmount,
 	}
@@ -1596,15 +1682,15 @@ func (s *MsgServerTestSuite) TestEqualStakeRewardsToDelegatorAndReputer() {
 	require.NoError(err, "AddStake should not return an error")
 	require.NotNil(response)
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  stakeAmount,
 	}
 
 	//
-	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputerAddr.String())
+	reputerStake, err := s.emissionsKeeper.GetStakeReputerAuthority(ctx, topicId, reputer)
 	require.NoError(err)
 	require.Equal(stakeAmount, reputerStake, "Stake amount mismatch")
 
@@ -1613,13 +1699,13 @@ func (s *MsgServerTestSuite) TestEqualStakeRewardsToDelegatorAndReputer() {
 	require.NoError(err)
 	require.NotNil(responseDelegator, "Response should not be nil after successful delegation")
 
-	reputerRewards := s.insertValueBundlesAndGetRewards(reputerAddr, topicId, block, score)
+	reputerRewards := s.insertValueBundlesAndGetRewards(reputerPrivKey, reputer, reputerPubKeyHex, topicId, block, score)
 
 	delegatorBal0 := s.bankKeeper.GetBalance(ctx, delegatorAddr, params.DefaultBondDenom)
-	rewardMsg := &types.MsgRewardDelegateStake{
-		Sender:  delegatorAddr.String(),
+	rewardMsg := &types.RewardDelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, rewardMsg)
 	s.Require().NoError(err)
@@ -1664,23 +1750,29 @@ func (s *MsgServerTestSuite) Test1000xDelegatorStakeVsReputerStake() {
 	// newBlock := int64(1004)
 	score := alloraMath.MustNewDecFromString("17.53436")
 
-	delegatorAddr := sdk.AccAddress(PKS[0].Address())
-	reputerAddr := sdk.AccAddress(PKS[1].Address())
-	workerAddr := sdk.AccAddress(PKS[2].Address()) // target
+	delegatorAddr := s.addrs[0]
+	delegator := s.addrsStr[0]
+	reputerAddr := s.addrs[1]
+	reputerPubKeyHex := s.pubKeyHexStr[1]
+	reputerPrivKey := s.privKeys[1]
+	reputer := s.addrsStr[1]
+	workerAddr := s.addrs[2]
+	worker := s.addrsStr[2]
 
 	registrationInitialBalance := cosmosMath.NewInt(10000)
 	reputerStakeAmount := cosmosMath.NewInt(1e2)
 	delegatorRatio := cosmosMath.NewInt(1e3)
 	delegatorStakeAmount := reputerStakeAmount.Mul(delegatorRatio)
 
-	topicId := s.commonStakingSetup(ctx, reputerAddr.String(), workerAddr.String(), registrationInitialBalance)
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 	s.MintTokensToAddress(reputerAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000000))
-	err := s.bankKeeper.MintCoins(ctx, types.AlloraRewardsAccountName, sdk.NewCoins(sdk.NewCoin(params.DefaultBondDenom, cosmosMath.NewInt(1000000))))
+	err := s.bankKeeper.MintCoins(ctx, types.AlloraRewardsAccountName,
+		sdk.NewCoins(sdk.NewCoin(params.DefaultBondDenom, cosmosMath.NewInt(1000000))))
 	require.NoError(err)
 
-	addStakeMsg := &types.MsgAddStake{
-		Sender:  reputerAddr.String(),
+	addStakeMsg := &types.AddStakeRequest{
+		Sender:  reputer,
 		TopicId: topicId,
 		Amount:  reputerStakeAmount,
 	}
@@ -1689,10 +1781,10 @@ func (s *MsgServerTestSuite) Test1000xDelegatorStakeVsReputerStake() {
 	require.NoError(err, "AddStake should not return an error")
 	require.NotNil(response)
 
-	msg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
+	msg := &types.DelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  delegatorStakeAmount,
 	}
 
@@ -1701,13 +1793,13 @@ func (s *MsgServerTestSuite) Test1000xDelegatorStakeVsReputerStake() {
 	require.NoError(err)
 	require.NotNil(delegateResponse, "Response should not be nil after successful delegation")
 
-	reputerRewards := s.insertValueBundlesAndGetRewards(reputerAddr, topicId, block, score)
+	reputerRewards := s.insertValueBundlesAndGetRewards(reputerPrivKey, reputer, reputerPubKeyHex, topicId, block, score)
 
 	delegatorBal0 := s.bankKeeper.GetBalance(ctx, delegatorAddr, params.DefaultBondDenom)
-	rewardMsg := &types.MsgRewardDelegateStake{
-		Sender:  delegatorAddr.String(),
+	rewardMsg := &types.RewardDelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, rewardMsg)
 
@@ -1731,17 +1823,23 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	block := int64(1000)
 	score := alloraMath.MustNewDecFromString("17.53436")
 
-	reputerAddr := sdk.AccAddress(PKS[0].Address())
-	delegatorAddr := sdk.AccAddress(PKS[1].Address())
-	largeDelegatorAddr := sdk.AccAddress(PKS[2].Address())
-	workerAddr := sdk.AccAddress(PKS[3].Address()) // target
+	reputerPrivKey := s.privKeys[0]
+	reputerPubKeyHex := s.pubKeyHexStr[0]
+	reputerAddr := s.addrs[0]
+	reputer := s.addrsStr[0]
+	delegatorAddr := s.addrs[1]
+	delegator := s.addrsStr[1]
+	largeDelegatorAddr := s.addrs[2]
+	largeDelegator := s.addrsStr[2]
+	workerAddr := s.addrs[3]
+	worker := s.addrsStr[3]
 
 	registrationInitialBalance := cosmosMath.NewInt(10000)
 	reputerStakeAmount := cosmosMath.NewInt(1e2)
 	largeDelegatorRatio := cosmosMath.NewInt(1e3)
 	largeDelegatorStakeAmount := reputerStakeAmount.Mul(largeDelegatorRatio)
 
-	topicId := s.commonStakingSetup(ctx, reputerAddr.String(), workerAddr.String(), registrationInitialBalance)
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 	s.MintTokensToAddress(reputerAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(delegatorAddr, cosmosMath.NewInt(1000000))
 	s.MintTokensToAddress(largeDelegatorAddr, cosmosMath.NewInt(1000000))
@@ -1749,8 +1847,8 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	require.NoError(err)
 
 	// STEP 1 stake equal amount for reputer and delegator
-	addStakeMsg := &types.MsgAddStake{
-		Sender:  reputerAddr.String(),
+	addStakeMsg := &types.AddStakeRequest{
+		Sender:  reputer,
 		TopicId: topicId,
 		Amount:  reputerStakeAmount,
 	}
@@ -1759,10 +1857,10 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	require.NoError(err, "AddStake should not return an error")
 	require.NotNil(response)
 
-	addDelegateStakeMsg := &types.MsgDelegateStake{
-		Sender:  delegatorAddr.String(),
+	addDelegateStakeMsg := &types.DelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  reputerStakeAmount,
 	}
 
@@ -1771,15 +1869,16 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	require.NotNil(delegateStakeResponse, "Response should not be nil after successful delegation")
 
 	// STEP 2 Calculate rewards for the first round
-	reputerReward0, err := s.insertValueBundlesAndGetRewards(reputerAddr, topicId, block, score)[0].Reward.SdkIntTrim()
+	reputerReward0, err := s.insertValueBundlesAndGetRewards(
+		reputerPrivKey, reputer, reputerPubKeyHex, topicId, block, score)[0].Reward.SdkIntTrim()
 	require.NoError(err)
 
 	delegatorBal0 := s.bankKeeper.GetBalance(ctx, delegatorAddr, params.DefaultBondDenom)
 
-	delegateRewardsMsg := &types.MsgRewardDelegateStake{
-		Sender:  delegatorAddr.String(),
+	delegateRewardsMsg := &types.RewardDelegateStakeRequest{
+		Sender:  delegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, delegateRewardsMsg)
 	require.NoError(err)
@@ -1791,7 +1890,8 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	// STEP 2 Calculate rewards for the second round
 	block++
 
-	reputerReward1, err := s.insertValueBundlesAndGetRewards(reputerAddr, topicId, block, score)[0].Reward.SdkIntTrim()
+	reputerReward1, err := s.insertValueBundlesAndGetRewards(
+		reputerPrivKey, reputer, reputerPubKeyHex, topicId, block, score)[0].Reward.SdkIntTrim()
 	require.NoError(err)
 
 	_, err = s.msgServer.RewardDelegateStake(ctx, delegateRewardsMsg)
@@ -1802,10 +1902,10 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 	delegatorReward1 := delegatorBal2.Amount.Sub(delegatorBal1.Amount)
 
 	// STEP 3 stake 1000x more for large delegator
-	addLargeDelegateStakeMsg := &types.MsgDelegateStake{
-		Sender:  largeDelegatorAddr.String(),
+	addLargeDelegateStakeMsg := &types.DelegateStakeRequest{
+		Sender:  largeDelegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 		Amount:  largeDelegatorStakeAmount,
 	}
 
@@ -1817,16 +1917,17 @@ func (s *MsgServerTestSuite) TestMultiRoundReputerStakeVs1000xDelegatorStake() {
 
 	// STEP 4 Calculate rewards for the third round
 	block++
-	reputerReward2, err := s.insertValueBundlesAndGetRewards(reputerAddr, topicId, block, score)[0].Reward.SdkIntTrim()
+	reputerReward2, err := s.insertValueBundlesAndGetRewards(
+		reputerPrivKey, reputer, reputerPubKeyHex, topicId, block, score)[0].Reward.SdkIntTrim()
 	require.NoError(err)
 
 	_, err = s.msgServer.RewardDelegateStake(ctx, delegateRewardsMsg)
 	require.NoError(err)
 
-	largeDelegateRewardsMsg := &types.MsgRewardDelegateStake{
-		Sender:  largeDelegatorAddr.String(),
+	largeDelegateRewardsMsg := &types.RewardDelegateStakeRequest{
+		Sender:  largeDelegator,
 		TopicId: topicId,
-		Reputer: reputerAddr.String(),
+		Reputer: reputer,
 	}
 	_, err = s.msgServer.RewardDelegateStake(ctx, largeDelegateRewardsMsg)
 	require.NoError(err)
@@ -1871,14 +1972,14 @@ func (s *MsgServerTestSuite) TestCancelRemoveStake() {
 	require := s.Require()
 
 	// Set up test data
-	reputer := getNewAddress()
-	topicID := uint64(123)
+	reputer := s.addrsStr[0]
+	topicId := s.CreateOneTopic().Id
 	amount := cosmosMath.NewInt(50)
 
 	// Add a delegate stake removal
 	stakeToRemove := types.StakeRemovalInfo{
 		BlockRemovalStarted:   10,
-		TopicId:               topicID,
+		TopicId:               topicId,
 		Reputer:               reputer,
 		Amount:                amount,
 		BlockRemovalCompleted: 20,
@@ -1887,16 +1988,16 @@ func (s *MsgServerTestSuite) TestCancelRemoveStake() {
 	require.NoError(err)
 
 	// Call CancelRemoveDelegateStake
-	msg := &types.MsgCancelRemoveStake{
+	msg := &types.CancelRemoveStakeRequest{
 		Sender:  reputer,
-		TopicId: topicID,
+		TopicId: topicId,
 	}
 	_, err = s.msgServer.CancelRemoveStake(ctx, msg)
 	require.NoError(err)
 
 	// Verify that the stake removal is deleted
 	_, found, err := s.emissionsKeeper.
-		GetStakeRemovalForReputerAndTopicId(ctx, reputer, topicID)
+		GetStakeRemovalForReputerAndTopicId(ctx, reputer, topicId)
 	require.NoError(err)
 	require.False(found, "Stake removal should be deleted")
 }
@@ -1905,10 +2006,11 @@ func (s *MsgServerTestSuite) TestCancelRemoveStakeNotExist() {
 	ctx := s.ctx
 	require := s.Require()
 	// Set up test data
-	reputer := getNewAddress()
-	topicID := uint64(123)
+	reputer := s.addrsStr[0]
+	topicID := s.CreateOneTopic().Id
+
 	// Call CancelRemoveDelegateStake
-	msg := &types.MsgCancelRemoveStake{
+	msg := &types.CancelRemoveStakeRequest{
 		Sender:  reputer,
 		TopicId: topicID,
 	}
@@ -1921,15 +2023,20 @@ func (s *MsgServerTestSuite) TestCancelRemoveDelegateStake() {
 	ctx := s.ctx
 	require := s.Require()
 	// Set up test data
-	delegator := getNewAddress()
-	reputer := getNewAddress()
-	topicID := uint64(123)
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	reputerAddr := s.addrs[1]
+	worker := s.addrsStr[2]
+	workerAddr := s.addrs[2]
+	registrationInitialBalance := cosmosMath.NewInt(10000)
 	amount := cosmosMath.NewInt(50)
+
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
 
 	// Add a delegate stake removal
 	stakeToRemove := types.DelegateStakeRemovalInfo{
 		BlockRemovalStarted:   10,
-		TopicId:               topicID,
+		TopicId:               topicId,
 		Reputer:               reputer,
 		Delegator:             delegator,
 		Amount:                amount,
@@ -1939,17 +2046,18 @@ func (s *MsgServerTestSuite) TestCancelRemoveDelegateStake() {
 	require.NoError(err)
 
 	// Call CancelRemoveDelegateStake
-	msg := &types.MsgCancelRemoveDelegateStake{
-		Sender:  delegator,
-		Reputer: reputer,
-		TopicId: topicID,
+	msg := &types.CancelRemoveDelegateStakeRequest{
+		Sender:    delegator,
+		Reputer:   reputer,
+		TopicId:   topicId,
+		Delegator: delegator,
 	}
 	_, err = s.msgServer.CancelRemoveDelegateStake(ctx, msg)
 	require.NoError(err)
 
 	// Verify that the stake removal is deleted
 	_, found, err := s.emissionsKeeper.
-		GetDelegateStakeRemovalForDelegatorReputerAndTopicId(ctx, delegator, reputer, topicID)
+		GetDelegateStakeRemovalForDelegatorReputerAndTopicId(ctx, delegator, reputer, topicId)
 	require.NoError(err)
 	require.False(found, "Stake removal should be deleted")
 }
@@ -1958,14 +2066,21 @@ func (s *MsgServerTestSuite) TestCancelRemoveDelegateStakeNotExist() {
 	ctx := s.ctx
 	require := s.Require()
 	// Set up test data
-	delegator := getNewAddress()
-	reputer := getNewAddress()
-	topicID := uint64(123)
+	delegator := s.addrsStr[0]
+	reputer := s.addrsStr[1]
+	reputerAddr := s.addrs[1]
+	worker := s.addrsStr[2]
+	workerAddr := s.addrs[2]
+	registrationInitialBalance := cosmosMath.NewInt(10000)
+
+	topicId := s.commonStakingSetup(ctx, reputer, reputerAddr, worker, workerAddr, registrationInitialBalance)
+
 	// Call CancelRemoveDelegateStake
-	msg := &types.MsgCancelRemoveDelegateStake{
-		Sender:  delegator,
-		Reputer: reputer,
-		TopicId: topicID,
+	msg := &types.CancelRemoveDelegateStakeRequest{
+		Sender:    delegator,
+		Reputer:   reputer,
+		TopicId:   topicId,
+		Delegator: delegator,
 	}
 	_, err := s.msgServer.CancelRemoveDelegateStake(ctx, msg)
 	require.Error(err)

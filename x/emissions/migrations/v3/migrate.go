@@ -9,14 +9,16 @@ import (
 	cosmosMath "cosmossdk.io/math"
 	"cosmossdk.io/store/prefix"
 	storetypes "cosmossdk.io/store/types"
-	alloraMath "github.com/allora-network/allora-chain/math"
-	"github.com/allora-network/allora-chain/x/emissions/keeper"
-	oldtypes "github.com/allora-network/allora-chain/x/emissions/migrations/v3/types"
-	types "github.com/allora-network/allora-chain/x/emissions/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/gogo/protobuf/proto"
+
+	alloraMath "github.com/allora-network/allora-chain/math"
+	"github.com/allora-network/allora-chain/utils/migutils"
+	"github.com/allora-network/allora-chain/x/emissions/keeper"
+	oldtypes "github.com/allora-network/allora-chain/x/emissions/migrations/v3/oldtypes"
+	types "github.com/allora-network/allora-chain/x/emissions/types"
 )
 
 const maxPageSize = uint64(10000)
@@ -40,13 +42,17 @@ func MigrateStore(ctx sdk.Context, emissionsKeeper keeper.Keeper) error {
 	}
 
 	ctx.Logger().Info("INVOKING MIGRATION HANDLER ResetMapsWithNonNumericValues() FROM VERSION 2 TO VERSION 3")
-	ResetMapsWithNonNumericValues(store, cdc)
+	err := ResetMapsWithNonNumericValues(ctx, store, cdc)
+	if err != nil {
+		ctx.Logger().Error("ERROR RESETTING MAPS WITH NON NUMERIC VALUES: %v", err)
+		return err
+	}
 
 	return nil
 }
 
 func MigrateParams(store storetypes.KVStore, cdc codec.BinaryCodec) error {
-	oldParams := oldtypes.Params{}
+	oldParams := oldtypes.Params{} //nolint: exhaustruct // populated in unmarshal below
 	oldParamsBytes := store.Get(types.ParamsKey)
 	if oldParamsBytes == nil {
 		return errorsmod.Wrapf(types.ErrNotFound, "old parameters not found")
@@ -68,7 +74,7 @@ func MigrateParams(store storetypes.KVStore, cdc codec.BinaryCodec) error {
 	//      MaxRetriesToFulfilNoncesWorker
 	//      MaxRetriesToFulfilNoncesReputer
 	//      MaxTopicsPerBlock
-	newParams := types.Params{
+	newParams := types.Params{ //nolint: exhaustruct // not sure if safe to fix, also this upgrade has already happened.
 		Version:                             oldParams.Version,
 		MaxSerializedMsgLength:              oldParams.MaxSerializedMsgLength,
 		MinTopicWeight:                      oldParams.MinTopicWeight,
@@ -127,7 +133,6 @@ func MigrateTopics(
 	topicFeeRevStore := prefix.NewStore(store, types.TopicFeeRevenueKey)
 	topicStakeStore := prefix.NewStore(store, types.TopicStakeKey)
 	topicPreviousWeightStore := prefix.NewStore(store, types.PreviousTopicWeightKey)
-	iterator := topicStore.Iterator(nil, nil)
 	churningBlockStore := prefix.NewStore(store, types.TopicToNextPossibleChurningBlockKey)
 	blockToActiveStore := prefix.NewStore(store, types.BlockToActiveTopicsKey)
 	blockLowestWeightStore := prefix.NewStore(store, types.BlockToLowestActiveTopicWeightKey)
@@ -135,10 +140,13 @@ func MigrateTopics(
 	if err != nil {
 		return errorsmod.Wrapf(err, "failed to get params for active topic migration")
 	}
-	churningBlock := make(map[types.TopicId]types.BlockHeight, 0)
+
+	iterator := topicStore.Iterator(nil, nil)
+	defer iterator.Close()
+
 	blockToActiveTopics := make(map[types.BlockHeight]types.TopicIds, 0)
 	lowestWeight := make(map[types.BlockHeight]types.TopicIdWeightPair, 0)
-
+	churningBlock := make(map[types.TopicId]types.BlockHeight, 0)
 	topicWeightData := make(map[types.TopicId]alloraMath.Dec, 0)
 
 	topicsToChange := make(map[string]types.Topic, 0)
@@ -156,7 +164,7 @@ func MigrateTopics(
 			topicsToChange[string(iterator.Key())] = getNewTopic(oldMsg)
 			continue
 		}
-		var stake = cosmosMath.NewInt(0)
+		stake := cosmosMath.NewInt(0)
 		err = stake.Unmarshal(topicStakeStore.Get(idArray))
 		if err != nil {
 			topicsToChange[string(iterator.Key())] = getNewTopic(oldMsg)
@@ -192,6 +200,29 @@ func MigrateTopics(
 			continue
 		}
 
+		activeTopicIds := blockToActiveTopics[blockHeight]
+		activeTopicIds.TopicIds = append(activeTopicIds.TopicIds, oldMsg.Id)
+		// If number of active topic is over global param then remove lowest topic
+		if uint64(len(blockToActiveTopics[blockHeight].TopicIds)) >= params.MaxActiveTopicsPerBlock {
+			// If current weight is lower than lowest then skip
+			// Otherwise upgrade lowest weight
+			if weight.Lt(lowestWeight[blockHeight].Weight) {
+				continue
+			} else {
+				newActiveTopicIds := []types.TopicId{}
+				for i, id := range activeTopicIds.TopicIds {
+					if id == lowestWeight[blockHeight].TopicId {
+						delete(churningBlock, id)
+						newActiveTopicIds = append(activeTopicIds.TopicIds[:i],
+							activeTopicIds.TopicIds[i+1:]...)
+						break
+					}
+				}
+				activeTopicIds.TopicIds = newActiveTopicIds
+				lowestWeight[blockHeight] = getLowestTopicIdWeightPair(topicWeightData, activeTopicIds)
+			}
+		}
+		churningBlock[oldMsg.Id] = blockHeight
 		cuLowestWeight := lowestWeight[blockHeight]
 		// Update lowest weight of topic per block
 		if cuLowestWeight.Weight.Equal(alloraMath.ZeroDec()) ||
@@ -200,37 +231,14 @@ func MigrateTopics(
 				Weight:  weight,
 				TopicId: oldMsg.Id,
 			}
+			lowestWeight[blockHeight] = cuLowestWeight
 		}
 
-		churningBlock[oldMsg.Id] = blockHeight
-
-		activeTopicIds := blockToActiveTopics[blockHeight]
-		activeTopicIds.TopicIds = append(activeTopicIds.TopicIds, oldMsg.Id)
-
-		// If number of active topic is over global param then remove lowest topic
-		if uint64(len(blockToActiveTopics[blockHeight].TopicIds)) > params.MaxActiveTopicsPerBlock {
-			// Remove from topicToNextPossibleChurningBlock
-			delete(churningBlock, lowestWeight[blockHeight].TopicId)
-			newActiveTopicIds := []types.TopicId{}
-			for i, id := range blockToActiveTopics[blockHeight].TopicIds {
-				if id == lowestWeight[blockHeight].TopicId {
-					newActiveTopicIds = append(blockToActiveTopics[blockHeight].TopicIds[:i],
-						blockToActiveTopics[blockHeight].TopicIds[i+1:]...)
-					break
-				}
-			}
-			// Reset active topics per block
-			activeTopicIds.TopicIds = newActiveTopicIds
-			//blockToActiveTopics[blockHeight] = types.TopicIds{TopicIds: newActiveTopicIds}
-			// Reset lowest weight per block
-			cuLowestWeight = getLowestTopicIdWeightPair(topicWeightData, blockToActiveTopics[blockHeight])
-		}
 		blockToActiveTopics[blockHeight] = activeTopicIds
 		blockHeightBytes, err := collections.Int64Value.Encode(blockHeight)
 		if err != nil {
 			return err
 		}
-		churningBlockStore.Set(idArray, blockHeightBytes)
 		activeTopicsBytes, err := activeTopicIds.Marshal()
 		if err != nil {
 			return err
@@ -244,7 +252,20 @@ func MigrateTopics(
 
 		topicsToChange[string(iterator.Key())] = getNewTopic(oldMsg)
 	}
-	_ = iterator.Close()
+	err = iterator.Close()
+	if err != nil {
+		return err
+	}
+
+	for key, value := range churningBlock {
+		blockHeightBytes, err := collections.Int64Value.Encode(value)
+		if err != nil {
+			return err
+		}
+		idArray := make([]byte, 8)
+		binary.BigEndian.PutUint64(idArray, key)
+		churningBlockStore.Set(idArray, blockHeightBytes)
+	}
 	for key, value := range topicsToChange {
 		topicStore.Set([]byte(key), cdc.MustMarshal(&value))
 	}
@@ -264,7 +285,7 @@ func getNewTopic(oldMsg oldtypes.Topic) types.Topic {
 		PNorm:          oldMsg.PNorm,
 		AlphaRegret:    oldMsg.AlphaRegret,
 		AllowNegative:  oldMsg.AllowNegative,
-		Epsilon:        alloraMath.MustNewDecFromString("0.01"),
+		Epsilon:        oldMsg.Epsilon,
 		// InitialRegret is being reset to account for NaNs that were previously stored due to insufficient validation
 		InitialRegret:          alloraMath.MustNewDecFromString("0"),
 		WorkerSubmissionWindow: oldMsg.WorkerSubmissionWindow,
@@ -276,57 +297,32 @@ func getNewTopic(oldMsg oldtypes.Topic) types.Topic {
 	}
 }
 
-// Deletes all keys in the store with the given keyPrefix `maxPageSize` keys at a time
-func safelyClearWholeMap(store storetypes.KVStore, keyPrefix []byte) {
-	s := prefix.NewStore(store, keyPrefix)
-
-	// Loop until all keys are deleted.
-	// Unbounded not best practice but we are sure that the number of keys will be limited
-	// and not deleting all keys means "poison" will remain in the store.
-	for {
-		// Gather keys to eventually delete
-		iterator := s.Iterator(nil, nil)
-		keysToDelete := make([][]byte, 0)
-		count := uint64(0)
-		for ; iterator.Valid(); iterator.Next() {
-			if count >= maxPageSize {
-				break
-			}
-
-			keysToDelete = append(keysToDelete, iterator.Key())
-			count++
-		}
-		iterator.Close()
-
-		// If no keys to delete, break => Exit whole function
-		if len(keysToDelete) == 0 {
-			break
-		}
-
-		// Delete the keys
-		for _, key := range keysToDelete {
-			s.Delete(key)
+func ResetMapsWithNonNumericValues(ctx sdk.Context, store storetypes.KVStore, cdc codec.BinaryCodec) error {
+	prefixes := []collections.Prefix{
+		types.InferenceScoresKey,
+		types.ForecastScoresKey,
+		types.ReputerScoresKey,
+		types.InfererScoreEmasKey,
+		types.ForecasterScoreEmasKey,
+		types.ReputerScoreEmasKey,
+		types.AllLossBundlesKey,
+		types.NetworkLossBundlesKey,
+		types.InfererNetworkRegretsKey,
+		types.ForecasterNetworkRegretsKey,
+		types.OneInForecasterNetworkRegretsKey,
+		types.LatestNaiveInfererNetworkRegretsKey,
+		types.LatestOneOutInfererInfererNetworkRegretsKey,
+		types.LatestOneOutInfererForecasterNetworkRegretsKey,
+		types.LatestOneOutForecasterInfererNetworkRegretsKey,
+		types.LatestOneOutForecasterForecasterNetworkRegretsKey,
+	}
+	for _, prefix := range prefixes {
+		err := migutils.SafelyClearWholeMap(ctx, store, prefix, maxPageSize)
+		if err != nil {
+			return err
 		}
 	}
-}
-
-func ResetMapsWithNonNumericValues(store storetypes.KVStore, cdc codec.BinaryCodec) {
-	safelyClearWholeMap(store, types.InferenceScoresKey)
-	safelyClearWholeMap(store, types.ForecastScoresKey)
-	safelyClearWholeMap(store, types.ReputerScoresKey)
-	safelyClearWholeMap(store, types.InfererScoreEmasKey)
-	safelyClearWholeMap(store, types.ForecasterScoreEmasKey)
-	safelyClearWholeMap(store, types.ReputerScoreEmasKey)
-	safelyClearWholeMap(store, types.AllLossBundlesKey)
-	safelyClearWholeMap(store, types.NetworkLossBundlesKey)
-	safelyClearWholeMap(store, types.InfererNetworkRegretsKey)
-	safelyClearWholeMap(store, types.ForecasterNetworkRegretsKey)
-	safelyClearWholeMap(store, types.OneInForecasterNetworkRegretsKey)
-	safelyClearWholeMap(store, types.LatestNaiveInfererNetworkRegretsKey)
-	safelyClearWholeMap(store, types.LatestOneOutInfererInfererNetworkRegretsKey)
-	safelyClearWholeMap(store, types.LatestOneOutInfererForecasterNetworkRegretsKey)
-	safelyClearWholeMap(store, types.LatestOneOutForecasterInfererNetworkRegretsKey)
-	safelyClearWholeMap(store, types.LatestOneOutForecasterForecasterNetworkRegretsKey)
+	return nil
 }
 
 func getTopicWeight(

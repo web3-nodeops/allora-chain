@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/collections"
 	storetypes "cosmossdk.io/core/store"
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
 	"cosmossdk.io/math"
 	"github.com/allora-network/allora-chain/app/params"
@@ -51,6 +52,7 @@ func NewKeeper(
 
 	sb := collections.NewSchemaBuilder(storeService)
 	k := Keeper{
+		Schema:                                   collections.Schema{},
 		cdc:                                      cdc,
 		storeService:                             storeService,
 		stakingKeeper:                            sk,
@@ -157,12 +159,17 @@ func (k Keeper) PayAlloraRewardsFromEcosystem(ctx context.Context, rewards sdk.C
 	if rewards.Empty() {
 		return nil
 	}
-	return k.bankKeeper.SendCoinsFromModuleToModule(
+	err := k.bankKeeper.SendCoinsFromModuleToModule(
 		ctx,
 		types.EcosystemModuleName,
 		emissionstypes.AlloraRewardsAccountName,
 		rewards,
 	)
+	if err != nil {
+		return err
+	}
+
+	return k.emissionsKeeper.SetRewardCurrentBlockEmission(ctx, rewards.AmountOf(params.BaseCoinUnit))
 }
 
 // GetTotalCurrTokenSupply implements an alias call to the underlying supply keeper's
@@ -217,6 +224,16 @@ func (k Keeper) GetParamsBlocksPerMonth(ctx context.Context) (uint64, error) {
 	return emissionsParams.BlocksPerMonth, nil
 }
 
+// wrapper around emissions keeper call to set the number of blocks expected in a month
+func (k Keeper) SetEmissionsParamsBlocksPerMonth(ctx context.Context, blocksPerMonth uint64) error {
+	emissionsParams, err := k.emissionsKeeper.GetParams(ctx)
+	if err != nil {
+		return errorsmod.Wrap(err, "error getting params from emissions keeper")
+	}
+	emissionsParams.BlocksPerMonth = blocksPerMonth
+	return k.emissionsKeeper.SetParams(ctx, emissionsParams)
+}
+
 // wrapper around emissions keeper call to get if whitelist admin
 func (k Keeper) IsWhitelistAdmin(ctx context.Context, admin string) (bool, error) {
 	return k.emissionsKeeper.IsWhitelistAdmin(ctx, admin)
@@ -230,4 +247,9 @@ func (k Keeper) GetPreviousRewardEmissionPerUnitStakedToken(ctx context.Context)
 // wrapper for interface compatibility for unit testing
 func (k Keeper) GetEmissionsKeeperTotalStake(ctx context.Context) (math.Int, error) {
 	return k.emissionsKeeper.GetTotalStake(ctx)
+}
+
+// wrapper for interface compatibility for unit testing
+func (k Keeper) SetRewardCurrentBlockEmission(ctx context.Context, emission math.Int) error {
+	return k.emissionsKeeper.SetRewardCurrentBlockEmission(ctx, emission)
 }

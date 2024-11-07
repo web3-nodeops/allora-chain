@@ -2,21 +2,25 @@ package msgserver
 
 import (
 	"context"
+	"time"
 
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 )
 
-func (ms msgServer) AddToWhitelistAdmin(ctx context.Context, msg *types.MsgAddToWhitelistAdmin) (*types.MsgAddToWhitelistAdminResponse, error) {
+func (ms msgServer) AddToWhitelistAdmin(ctx context.Context, msg *types.AddToWhitelistAdminRequest) (_ *types.AddToWhitelistAdminResponse, err error) {
+	defer metrics.RecordMetrics("AddToWhitelistAdmin", time.Now(), &err)
+
 	// Validate the sender address
-	if err := ms.k.ValidateStringIsBech32(msg.Sender); err != nil {
+	err = ms.k.ValidateStringIsBech32(msg.Sender)
+	if err != nil {
 		return nil, err
 	}
 	// Check that sender is also a whitelist admin
 	isAdmin, err := ms.k.IsWhitelistAdmin(ctx, msg.Sender)
 	if err != nil {
 		return nil, err
-	}
-	if !isAdmin {
+	} else if !isAdmin {
 		return nil, types.ErrNotWhitelistAdmin
 	}
 	// Validate the address
@@ -25,23 +29,22 @@ func (ms msgServer) AddToWhitelistAdmin(ctx context.Context, msg *types.MsgAddTo
 	}
 	// Add the address to the whitelist
 	err = ms.k.AddWhitelistAdmin(ctx, msg.Address)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgAddToWhitelistAdminResponse{}, nil
+	return &types.AddToWhitelistAdminResponse{}, err
 }
 
-func (ms msgServer) RemoveFromWhitelistAdmin(ctx context.Context, msg *types.MsgRemoveFromWhitelistAdmin) (*types.MsgRemoveFromWhitelistAdminResponse, error) {
+func (ms msgServer) RemoveFromWhitelistAdmin(ctx context.Context, msg *types.RemoveFromWhitelistAdminRequest) (_ *types.RemoveFromWhitelistAdminResponse, err error) {
+	defer metrics.RecordMetrics("RemoveFromWhitelistAdmin", time.Now(), &err)
+
 	// Validate the sender address
-	if err := ms.k.ValidateStringIsBech32(msg.Sender); err != nil {
+	err = ms.k.ValidateStringIsBech32(msg.Sender)
+	if err != nil {
 		return nil, err
 	}
 	// Check that sender is also a whitelist admin
 	isAdmin, err := ms.k.IsWhitelistAdmin(ctx, msg.Sender)
 	if err != nil {
 		return nil, err
-	}
-	if !isAdmin {
+	} else if !isAdmin {
 		return nil, types.ErrNotWhitelistAdmin
 	}
 	// Validate the address
@@ -50,8 +53,5 @@ func (ms msgServer) RemoveFromWhitelistAdmin(ctx context.Context, msg *types.Msg
 	}
 	// Remove the address from the whitelist
 	err = ms.k.RemoveWhitelistAdmin(ctx, msg.Address)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgRemoveFromWhitelistAdminResponse{}, nil
+	return &types.RemoveFromWhitelistAdminResponse{}, err
 }

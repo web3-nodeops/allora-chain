@@ -60,6 +60,18 @@ func (mr *MockEmissionsKeeperMockRecorder) GetParams(ctx interface{}) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetParams", reflect.TypeOf((*MockEmissionsKeeper)(nil).GetParams), ctx)
 }
 
+func (m *MockEmissionsKeeper) SetParams(ctx context.Context, params emissionstypes.Params) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetParams", ctx, params)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockEmissionsKeeperMockRecorder) SetParams(ctx, params interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetParams", reflect.TypeOf((*MockEmissionsKeeper)(nil).SetParams), ctx, params)
+}
+
 func (mr *MockEmissionsKeeperMockRecorder) GetParamsBlocksPerMonth(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetParamsBlocksPerMonth", reflect.TypeOf((*MockEmissionsKeeper)(nil).GetParamsBlocksPerMonth), ctx)
@@ -97,4 +109,16 @@ func (m *MockEmissionsKeeper) IsWhitelistAdmin(ctx context.Context, admin string
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
+}
+
+func (mr *MockEmissionsKeeperMockRecorder) SetRewardCurrentBlockEmission(ctx interface{}, emission interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRewardCurrentBlockEmission", reflect.TypeOf((*MockEmissionsKeeper)(nil).SetRewardCurrentBlockEmission), ctx, emission)
+}
+
+func (m *MockEmissionsKeeper) SetRewardCurrentBlockEmission(ctx context.Context, emission math.Int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetRewardCurrentBlockEmission", ctx, emission)
+	ret0, _ := ret[0].(error)
+	return ret0
 }

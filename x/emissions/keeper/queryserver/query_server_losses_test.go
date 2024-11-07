@@ -2,6 +2,7 @@ package queryserver_test
 
 import (
 	cosmosMath "cosmossdk.io/math"
+	alloraMath "github.com/allora-network/allora-chain/math"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 )
 
@@ -15,9 +16,22 @@ func (s *QueryServerTestSuite) TestGetNetworkLossBundleAtBlock() {
 
 	// Set up a sample NetworkLossBundle
 	expectedBundle := &types.ValueBundle{
-		TopicId:   topicId,
-		Reputer:   "sample_reputer",
-		ExtraData: []byte("sample_extra_data"),
+		TopicId: topicId,
+		Reputer: s.addrsStr[0],
+		ReputerRequestNonce: &types.ReputerRequestNonce{
+			ReputerNonce: &types.Nonce{
+				BlockHeight: blockHeight,
+			},
+		},
+		ExtraData:                     []byte("sample_extra_data"),
+		InfererValues:                 nil,
+		CombinedValue:                 alloraMath.ZeroDec(),
+		NaiveValue:                    alloraMath.ZeroDec(),
+		ForecasterValues:              nil,
+		OneOutInfererValues:           nil,
+		OneOutForecasterValues:        nil,
+		OneInForecasterValues:         nil,
+		OneOutInfererForecasterValues: nil,
 	}
 
 	err := keeper.InsertNetworkLossBundleAtBlock(ctx, topicId, blockHeight, *expectedBundle)
@@ -25,7 +39,7 @@ func (s *QueryServerTestSuite) TestGetNetworkLossBundleAtBlock() {
 
 	response, err := queryServer.GetNetworkLossBundleAtBlock(
 		ctx,
-		&types.QueryNetworkLossBundleAtBlockRequest{
+		&types.GetNetworkLossBundleAtBlockRequest{
 			TopicId:     topicId,
 			BlockHeight: blockHeight,
 		},
@@ -42,7 +56,7 @@ func (s *QueryServerTestSuite) TestIsReputerNonceUnfulfilled() {
 	topicId := uint64(1)
 	newNonce := &types.Nonce{BlockHeight: 42}
 
-	req := &types.QueryIsReputerNonceUnfulfilledRequest{
+	req := &types.IsReputerNonceUnfulfilledRequest{
 		TopicId:     topicId,
 		BlockHeight: newNonce.BlockHeight,
 	}
@@ -67,7 +81,7 @@ func (s *QueryServerTestSuite) TestGetUnfulfilledReputerNonces() {
 	topicId := uint64(1)
 
 	// Initially, ensure no unfulfilled nonces exist
-	req := &types.QueryUnfulfilledReputerNoncesRequest{
+	req := &types.GetUnfulfilledReputerNoncesRequest{
 		TopicId: topicId,
 	}
 	response, err := s.queryServer.GetUnfulfilledReputerNonces(s.ctx, req)
@@ -98,26 +112,48 @@ func (s *QueryServerTestSuite) TestGetReputerLossBundlesAtBlock() {
 	require := s.Require()
 	topicId := uint64(1)
 	block := types.BlockHeight(100)
-	reputerLossBundles := types.ReputerValueBundles{}
-
-	req := &types.QueryReputerLossBundlesAtBlockRequest{
+	valueBundle := types.ValueBundle{
+		TopicId:                       topicId,
+		Reputer:                       s.addrsStr[0],
+		ReputerRequestNonce:           &types.ReputerRequestNonce{ReputerNonce: &types.Nonce{BlockHeight: block}},
+		ExtraData:                     []byte("sample_extra_data"),
+		CombinedValue:                 alloraMath.NewDecFromInt64(100),
+		NaiveValue:                    alloraMath.NewDecFromInt64(100),
+		InfererValues:                 nil,
+		ForecasterValues:              nil,
+		OneOutInfererValues:           nil,
+		OneOutForecasterValues:        nil,
+		OneInForecasterValues:         nil,
+		OneOutInfererForecasterValues: nil,
+	}
+	signature := s.signValueBundle(&valueBundle, s.privKeys[0])
+	reputerLossBundles := types.ReputerValueBundles{
+		ReputerValueBundles: []*types.ReputerValueBundle{
+			{
+				ValueBundle: &valueBundle,
+				Signature:   signature,
+				Pubkey:      s.pubKeyHexStr[0],
+			},
+		},
+	}
+	req := &types.GetReputerLossBundlesAtBlockRequest{
 		TopicId:     topicId,
 		BlockHeight: block,
 	}
 	response, err := s.queryServer.GetReputerLossBundlesAtBlock(ctx, req)
 	require.NoError(err)
-	require.Nil(response.LossBundles.ReputerValueBundles)
+	require.Empty(response.LossBundles.ReputerValueBundles)
 
 	// Test inserting data
-	err = s.emissionsKeeper.InsertReputerLossBundlesAtBlock(ctx, topicId, block, reputerLossBundles)
-	require.NoError(err, "InsertReputerLossBundlesAtBlock should not return an error")
+	err = s.emissionsKeeper.InsertActiveReputerLosses(ctx, topicId, block, reputerLossBundles)
+	require.NoError(err, "InsertActiveReputerLosses should not return an error")
 
 	response, err = s.queryServer.GetReputerLossBundlesAtBlock(ctx, req)
-	require.NotNil(response)
+	require.NotEmpty(response)
 	require.NoError(err)
 
 	result := response.LossBundles
-	require.NotNil(result)
+	require.NotEmpty(result)
 	require.Equal(&reputerLossBundles, result, "Retrieved data should match inserted data")
 }
 
@@ -139,7 +175,7 @@ func (s *QueryServerTestSuite) TestGetDeleteDelegateStake() {
 	err := keeper.SetDelegateStakeRemoval(ctx, removalInfo)
 	s.Require().NoError(err)
 
-	req := &types.QueryDelegateStakeRemovalRequest{
+	req := &types.GetDelegateStakeRemovalRequest{
 		BlockHeight: removalInfo.BlockRemovalStarted,
 		TopicId:     removalInfo.TopicId,
 		Reputer:     removalInfo.Reputer,
@@ -162,4 +198,64 @@ func (s *QueryServerTestSuite) TestGetDeleteDelegateStake() {
 	s.Require().Equal(removalInfo.Reputer, retrievedInfo.Reputer)
 	s.Require().Equal(removalInfo.Delegator, retrievedInfo.Delegator)
 	s.Require().Equal(removalInfo.Amount, retrievedInfo.Amount)
+}
+
+func (s *QueryServerTestSuite) TestGetActiveReputersForTopic() {
+	s.CreateOneTopic()
+	ctx := s.ctx
+	keeper := s.emissionsKeeper
+	queryServer := s.queryServer
+	topicId := uint64(1)
+
+	// Add some active reputers
+	activeReputers := []string{
+		s.addrsStr[0],
+		s.addrsStr[1],
+		s.addrsStr[2],
+	}
+
+	for _, reputer := range activeReputers {
+		err := keeper.AddActiveReputer(ctx, topicId, reputer)
+		s.Require().NoError(err)
+	}
+
+	// Query for active reputers
+	response, err := queryServer.GetActiveReputersForTopic(
+		ctx,
+		&types.GetActiveReputersForTopicRequest{
+			TopicId: topicId,
+		},
+	)
+
+	s.Require().NoError(err)
+	s.Require().NotNil(response)
+	s.Require().Equal(len(activeReputers), len(response.Reputers))
+
+	// Check if all added reputers are in the response
+	for _, reputer := range activeReputers {
+		s.Require().Contains(response.Reputers, reputer)
+	}
+
+	// Test with non-existent topic
+	nonExistentTopicId := uint64(999)
+	_, err = queryServer.GetActiveReputersForTopic(
+		ctx,
+		&types.GetActiveReputersForTopicRequest{
+			TopicId: nonExistentTopicId,
+		},
+	)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not found")
+
+	// Test with no active reputers
+	emptyTopicId := s.CreateOneTopic()
+	emptyResponse, err := queryServer.GetActiveReputersForTopic(
+		ctx,
+		&types.GetActiveReputersForTopicRequest{
+			TopicId: emptyTopicId,
+		},
+	)
+	s.Require().NoError(err)
+	s.Require().NotNil(emptyResponse)
+	s.Require().Empty(emptyResponse.Reputers)
 }

@@ -47,10 +47,9 @@ func GetTopicRewardFraction(
 	return (*topicWeight).Quo(totalWeight)
 }
 
-// "Churn-ready topic" is active, has an epoch that ended, and is in top N by weights, has non-zero weight.
-// We iterate through active topics, fetch their weight, skim the top N by weight (these are the churnable topics)
-// then finally apply a function on each of these churnable topics.
-func PickChurnableActiveTopics(
+// At the end of epoch, we should update nonce status of active topics, skim the top N by weight.
+// Update worker/reputer nonces, also add reward topic nonce to get reward for this nonce.
+func UpdateNoncesOfActiveTopics(
 	ctx sdk.Context,
 	k keeper.Keeper,
 	block BlockHeight,
@@ -166,7 +165,7 @@ func GetAndUpdateActiveTopicWeights(
 		if err != nil {
 			return nil, alloraMath.Dec{}, cosmosMath.Int{}, errors.Wrapf(err, "failed to get current topic weight")
 		}
-
+		Logger(ctx).Debug(fmt.Sprintf("Setting previous topic weight for topic %d: %s", topic.Id, weight.String()))
 		err = k.SetPreviousTopicWeight(ctx, topic.Id, weight)
 		if err != nil {
 			return nil, alloraMath.Dec{}, cosmosMath.Int{}, errors.Wrapf(err, "failed to set previous topic weight")
@@ -186,13 +185,19 @@ func GetAndUpdateActiveTopicWeights(
 			if err != nil {
 				return nil, alloraMath.Dec{}, cosmosMath.Int{}, errors.Wrapf(err, "failed to inactivate topic")
 			}
+			ctx.Logger().Debug(fmt.Sprintf("Topic %d inactivated at block %d", topic.Id, block))
 			continue
 		}
 
 		// Update topic active status
 		err = k.AttemptTopicReactivation(ctx, topicId)
 		if err != nil {
-			ctx.Logger().Error("Error on attempt topic reactivation")
+			ctx.Logger().Error("Error on attempt topic reactivation, explicitly inactivating topic")
+			err := k.InactivateTopic(ctx, topic.Id)
+			if err != nil {
+				return nil, alloraMath.Dec{}, cosmosMath.Int{}, errors.Wrapf(err, "failed to inactivate topic")
+			}
+			ctx.Logger().Debug(fmt.Sprintf("Topic %d inactivated at block %d", topic.Id, block))
 			continue
 		}
 		totalRevenue = totalRevenue.Add(topicFeeRevenue)

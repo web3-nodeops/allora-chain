@@ -22,17 +22,11 @@ import (
 func CloseReputerNonce(
 	k *keeper.Keeper,
 	ctx sdk.Context,
-	topicId keeper.TopicId,
+	topic types.Topic,
 	nonce types.Nonce) error {
-	// Check if the topic exists
-	topic, err := k.GetTopic(ctx, topicId)
-	if err != nil {
-		return sdkerrors.ErrNotFound
-	}
-
 	/// All filters should be done in order of increasing computational complexity
 	// Check if the worker nonce is unfulfilled
-	workerNonceUnfulfilled, err := k.IsWorkerNonceUnfulfilled(ctx, topicId, &nonce)
+	workerNonceUnfulfilled, err := k.IsWorkerNonceUnfulfilled(ctx, topic.Id, &nonce)
 	if err != nil {
 		return err
 	}
@@ -46,7 +40,7 @@ func CloseReputerNonce(
 	}
 
 	// Check if the reputer nonce is unfulfilled
-	reputerNonceUnfulfilled, err := k.IsReputerNonceUnfulfilled(ctx, topicId, &nonce)
+	reputerNonceUnfulfilled, err := k.IsReputerNonceUnfulfilled(ctx, topic.Id, &nonce)
 	if err != nil {
 		return err
 	}
@@ -69,43 +63,22 @@ func CloseReputerNonce(
 		return err
 	}
 
-	reputerLossBundles, err := k.GetReputerLossBundlesAtBlock(ctx, topicId, nonce.BlockHeight)
+	// Get active reputers for the topic
+	activeReputerAddresses, err := k.GetActiveReputersForTopic(ctx, topic.Id)
 	if err != nil {
-		return types.ErrNoValidBundles
+		return err
 	}
 
-	// Iterate through the array to ensure each reputer is in the whitelist
-	// and get get score for each reputer => later we can skim only the top few by score descending
 	lossBundlesByReputer := make([]*types.ReputerValueBundle, 0)
 	stakesByReputer := make(map[string]cosmosMath.Int)
-	for _, bundle := range reputerLossBundles.ReputerValueBundles {
-		if err := bundle.Validate(); err != nil {
-			continue
-		}
-
-		reputer := bundle.ValueBundle.Reputer
-
-		// Check that the reputer's value bundle is for a topic matching the given topic
-		if bundle.ValueBundle.TopicId != topicId {
-			continue
-		}
-		// Check that the reputer's value bundle is for a nonce matching the given nonce
-		if bundle.ValueBundle.ReputerRequestNonce.ReputerNonce.BlockHeight != nonce.BlockHeight {
-			continue
-		}
-
-		// Check that the reputer is registered in the topic
-		isReputerRegistered, err := k.IsReputerRegisteredInTopic(ctx, bundle.ValueBundle.TopicId, reputer)
+	for _, address := range activeReputerAddresses {
+		bundle, err := k.GetReputerLatestLossByTopicId(ctx, topic.Id, address)
 		if err != nil {
-			continue
-		}
-		// We'll keep what we can get from the payload, but we'll ignore the rest
-		if !isReputerRegistered {
-			continue
+			return types.ErrNoValidBundles
 		}
 
 		// Check that the reputer enough stake in the topic
-		stake, err := k.GetStakeReputerAuthority(ctx, topicId, reputer)
+		stake, err := k.GetStakeReputerAuthority(ctx, topic.Id, bundle.ValueBundle.Reputer)
 		if err != nil {
 			continue
 		}
@@ -117,22 +90,13 @@ func CloseReputerNonce(
 		// A check of their registration and other filters have already been applied when their inferences were inserted.
 		// We keep what we can, ignoring the reputer and their contribution (losses) entirely
 		// if they're left with no valid losses.
-
-		filteredBundle, err := filterUnacceptedWorkersFromReputerValueBundle(k, ctx, topicId, *bundle.ValueBundle.ReputerRequestNonce, bundle)
+		filteredBundle, err := FilterUnacceptedWorkersFromReputerValueBundle(k, ctx, topic.Id, *bundle.ValueBundle.ReputerRequestNonce, &bundle)
 		if err != nil {
 			continue
 		}
-
-		/// If we do PoX-like anti-sybil procedure, would go here
 
 		/// Filtering done now, now write what we must for inclusion
-
 		lossBundlesByReputer = append(lossBundlesByReputer, filteredBundle)
-
-		stake, err = k.GetStakeReputerAuthority(ctx, topicId, reputer)
-		if err != nil {
-			continue
-		}
 		stakesByReputer[bundle.ValueBundle.Reputer] = stake
 	}
 
@@ -144,57 +108,49 @@ func CloseReputerNonce(
 	bundles := types.ReputerValueBundles{
 		ReputerValueBundles: lossBundlesByReputer,
 	}
-	err = k.InsertReputerLossBundlesAtBlock(ctx, topicId, nonce.BlockHeight, bundles)
+	err = k.InsertActiveReputerLosses(ctx, topic.Id, nonce.BlockHeight, bundles)
 	if err != nil {
 		return err
 	}
 
-	networkLossBundle, err := synth.CalcNetworkLosses(stakesByReputer, bundles)
+	networkLossBundle, err := synth.CalcNetworkLosses(topic.Id, nonce.BlockHeight, stakesByReputer, bundles)
 	if err != nil {
 		return err
 	}
 
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	sdkCtx.Logger().Debug(fmt.Sprintf("Reputer Nonce %d Network Loss Bundle %v", &nonce.BlockHeight, networkLossBundle))
+	ctx.Logger().Debug(fmt.Sprintf("Reputer Nonce %d Network Loss Bundle %v", &nonce.BlockHeight, networkLossBundle))
 
-	networkLossBundle.ReputerRequestNonce = &types.ReputerRequestNonce{
-		ReputerNonce: &nonce,
-	}
-
-	err = k.InsertNetworkLossBundleAtBlock(ctx, topicId, nonce.BlockHeight, networkLossBundle)
+	err = k.InsertNetworkLossBundleAtBlock(ctx, topic.Id, nonce.BlockHeight, networkLossBundle)
 	if err != nil {
 		return err
 	}
 
-	types.EmitNewNetworkLossSetEvent(sdkCtx, topicId, nonce.BlockHeight, networkLossBundle)
+	types.EmitNewNetworkLossSetEvent(ctx, topic.Id, nonce.BlockHeight, networkLossBundle)
 
 	err = synth.GetCalcSetNetworkRegrets(
-		sdkCtx,
-		*k,
-		topicId,
-		networkLossBundle,
-		nonce,
-		topic.AlphaRegret,
-		params.CNorm,
-		topic.PNorm,
-		topic.Epsilon)
+		synth.GetCalcSetNetworkRegretsArgs{
+			Ctx:                   ctx,
+			K:                     *k,
+			TopicId:               topic.Id,
+			NetworkLosses:         networkLossBundle,
+			Nonce:                 nonce,
+			AlphaRegret:           topic.AlphaRegret,
+			CNorm:                 params.CNorm,
+			PNorm:                 topic.PNorm,
+			EpsilonTopic:          topic.Epsilon,
+			InitialRegretQuantile: params.InitialRegretQuantile,
+			PNormSafeDiv:          params.PNormSafeDiv,
+		})
 	if err != nil {
 		return err
 	}
 
-	// Update the unfulfilled nonces
-	_, err = k.FulfillReputerNonce(ctx, topicId, &nonce)
+	_, err = k.FulfillReputerNonce(ctx, topic.Id, &nonce)
 	if err != nil {
 		return err
 	}
 
-	// Update topic reward nonce
-	err = k.SetTopicRewardNonce(ctx, topicId, nonce.BlockHeight)
-	if err != nil {
-		return err
-	}
-
-	err = k.AddRewardableTopic(ctx, topicId)
+	err = k.SetTopicRewardNonce(ctx, topic.Id, nonce.BlockHeight)
 	if err != nil {
 		return err
 	}
@@ -204,14 +160,25 @@ func CloseReputerNonce(
 		return err
 	}
 
-	sdkCtx.Logger().Info(fmt.Sprintf("Closed reputer nonce for topic: %d, nonce: %v", topicId, nonce))
+	err = k.ResetActiveReputersForTopic(ctx, topic.Id)
+	if err != nil {
+		return err
+	}
+
+	err = k.ResetReputersIndividualSubmissionsForTopic(ctx, topic.Id)
+	if err != nil {
+		return err
+	}
+
+	types.EmitNewReputerLastCommitSetEvent(ctx, topic.Id, blockHeight, &nonce)
+	ctx.Logger().Info(fmt.Sprintf("Closed reputer nonce for topic: %d, nonce: %v", topic.Id, nonce))
 	return nil
 }
 
 // Filter out values of unaccepted workers.
 // It is assumed that the work of inferers and forecasters stored at the nonce is already filtered for acceptance.
 // This also removes duplicate values of the same worker.
-func filterUnacceptedWorkersFromReputerValueBundle(
+func FilterUnacceptedWorkersFromReputerValueBundle(
 	k *keeper.Keeper,
 	ctx context.Context,
 	topicId uint64,
@@ -243,7 +210,6 @@ func filterUnacceptedWorkersFromReputerValueBundle(
 	}
 
 	// Filter out values submitted by unaccepted workers
-
 	acceptedInfererValues := make([]*types.WorkerAttributedValue, 0)
 	infererAlreadySeen := make(map[string]bool)
 	for _, workerVal := range reputerValueBundle.ValueBundle.InfererValues {
@@ -291,6 +257,30 @@ func filterUnacceptedWorkersFromReputerValueBundle(
 		}
 	}
 
+	acceptedOneOutInfererForecasterValues := make([]*types.OneOutInfererForecasterValues, 0)
+	for _, forecasterVal := range reputerValueBundle.ValueBundle.OneOutInfererForecasterValues {
+		if _, ok := acceptedForecastersOfBatch[forecasterVal.Forecaster]; ok {
+			// Filter out unaccepted workers for this forecaster
+			acceptedWorkers := make([]*types.WithheldWorkerAttributedValue, 0)
+			workerAlreadySeen := make(map[string]bool)
+			for _, workerVal := range forecasterVal.OneOutInfererValues {
+				if _, ok := acceptedInferersOfBatch[workerVal.Worker]; ok {
+					if _, ok := workerAlreadySeen[workerVal.Worker]; !ok {
+						acceptedWorkers = append(acceptedWorkers, workerVal)
+						workerAlreadySeen[workerVal.Worker] = true // Mark as seen => no duplicates
+					}
+				}
+			}
+			// Only add forecaster if it has at least one accepted worker
+			if len(acceptedWorkers) > 0 {
+				acceptedOneOutInfererForecasterValues = append(acceptedOneOutInfererForecasterValues, &types.OneOutInfererForecasterValues{
+					Forecaster:          forecasterVal.Forecaster,
+					OneOutInfererValues: acceptedWorkers,
+				})
+			}
+		}
+	}
+
 	acceptedOneInForecasterValues := make([]*types.WorkerAttributedValue, 0)
 	oneInForecasterAlreadySeen := make(map[string]bool)
 	for _, workerVal := range reputerValueBundle.ValueBundle.OneInForecasterValues {
@@ -303,18 +293,20 @@ func filterUnacceptedWorkersFromReputerValueBundle(
 	}
 
 	acceptedReputerValueBundle := &types.ReputerValueBundle{
+		Pubkey: reputerValueBundle.Pubkey,
 		ValueBundle: &types.ValueBundle{
-			TopicId:                reputerValueBundle.ValueBundle.TopicId,
-			ReputerRequestNonce:    reputerValueBundle.ValueBundle.ReputerRequestNonce,
-			Reputer:                reputerValueBundle.ValueBundle.Reputer,
-			ExtraData:              reputerValueBundle.ValueBundle.ExtraData,
-			InfererValues:          acceptedInfererValues,
-			ForecasterValues:       acceptedForecasterValues,
-			OneOutInfererValues:    acceptedOneOutInfererValues,
-			OneOutForecasterValues: acceptedOneOutForecasterValues,
-			OneInForecasterValues:  acceptedOneInForecasterValues,
-			NaiveValue:             reputerValueBundle.ValueBundle.NaiveValue,
-			CombinedValue:          reputerValueBundle.ValueBundle.CombinedValue,
+			TopicId:                       reputerValueBundle.ValueBundle.TopicId,
+			ReputerRequestNonce:           reputerValueBundle.ValueBundle.ReputerRequestNonce,
+			Reputer:                       reputerValueBundle.ValueBundle.Reputer,
+			ExtraData:                     reputerValueBundle.ValueBundle.ExtraData,
+			InfererValues:                 acceptedInfererValues,
+			ForecasterValues:              acceptedForecasterValues,
+			OneOutInfererValues:           acceptedOneOutInfererValues,
+			OneOutForecasterValues:        acceptedOneOutForecasterValues,
+			OneInForecasterValues:         acceptedOneInForecasterValues,
+			OneOutInfererForecasterValues: acceptedOneOutInfererForecasterValues,
+			NaiveValue:                    reputerValueBundle.ValueBundle.NaiveValue,
+			CombinedValue:                 reputerValueBundle.ValueBundle.CombinedValue,
 		},
 		Signature: reputerValueBundle.Signature,
 	}

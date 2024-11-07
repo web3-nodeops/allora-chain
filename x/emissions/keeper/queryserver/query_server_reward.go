@@ -2,81 +2,63 @@ package queryserver
 
 import (
 	"context"
+	"time"
 
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 )
 
-func (qs queryServer) GetPreviousReputerRewardFraction(
-	ctx context.Context,
-	req *types.QueryPreviousReputerRewardFractionRequest,
-) (
-	*types.QueryPreviousReputerRewardFractionResponse,
-	error,
-) {
+func (qs queryServer) GetPreviousReputerRewardFraction(ctx context.Context, req *types.GetPreviousReputerRewardFractionRequest) (_ *types.GetPreviousReputerRewardFractionResponse, err error) {
+	defer metrics.RecordMetrics("GetPreviousReputerRewardFraction", time.Now(), &err)
+
 	rewardFraction, notFound, err := qs.k.GetPreviousReputerRewardFraction(ctx, req.TopicId, req.Reputer)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryPreviousReputerRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
+	return &types.GetPreviousReputerRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
 }
 
-func (qs queryServer) GetPreviousInferenceRewardFraction(
-	ctx context.Context,
-	req *types.QueryPreviousInferenceRewardFractionRequest,
-) (
-	*types.QueryPreviousInferenceRewardFractionResponse,
-	error,
-) {
+func (qs queryServer) GetPreviousInferenceRewardFraction(ctx context.Context, req *types.GetPreviousInferenceRewardFractionRequest) (_ *types.GetPreviousInferenceRewardFractionResponse, err error) {
+	defer metrics.RecordMetrics("GetPreviousInferenceRewardFraction", time.Now(), &err)
+
 	rewardFraction, notFound, err := qs.k.GetPreviousInferenceRewardFraction(ctx, req.TopicId, req.Worker)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryPreviousInferenceRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
+	return &types.GetPreviousInferenceRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
 }
 
-func (qs queryServer) GetPreviousForecastRewardFraction(
-	ctx context.Context,
-	req *types.QueryPreviousForecastRewardFractionRequest,
-) (
-	*types.QueryPreviousForecastRewardFractionResponse,
-	error,
-) {
+func (qs queryServer) GetPreviousForecastRewardFraction(ctx context.Context, req *types.GetPreviousForecastRewardFractionRequest) (_ *types.GetPreviousForecastRewardFractionResponse, err error) {
+	defer metrics.RecordMetrics("GetPreviousForecastRewardFraction", time.Now(), &err)
+
 	rewardFraction, notFound, err := qs.k.GetPreviousForecastRewardFraction(ctx, req.TopicId, req.Worker)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryPreviousForecastRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
+	return &types.GetPreviousForecastRewardFractionResponse{RewardFraction: rewardFraction, NotFound: notFound}, nil
 }
 
-func (qs queryServer) GetPreviousPercentageRewardToStakedReputers(
-	ctx context.Context,
-	req *types.QueryPreviousPercentageRewardToStakedReputersRequest,
-) (
-	*types.QueryPreviousPercentageRewardToStakedReputersResponse,
-	error,
-) {
+func (qs queryServer) GetPreviousPercentageRewardToStakedReputers(ctx context.Context, req *types.GetPreviousPercentageRewardToStakedReputersRequest) (_ *types.GetPreviousPercentageRewardToStakedReputersResponse, err error) {
+	defer metrics.RecordMetrics("GetPreviousPercentageRewardToStakedReputers", time.Now(), &err)
+
 	percentageReward, err := qs.k.GetPreviousPercentageRewardToStakedReputers(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryPreviousPercentageRewardToStakedReputersResponse{PercentageReward: percentageReward}, nil
+	return &types.GetPreviousPercentageRewardToStakedReputersResponse{PercentageReward: percentageReward}, nil
 }
 
-func (qs queryServer) GetTotalRewardToDistribute(
-	ctx context.Context,
-	req *types.QueryTotalRewardToDistributeRequest,
-) (
-	*types.QueryTotalRewardToDistributeResponse,
-	error,
-) {
+func (qs queryServer) GetTotalRewardToDistribute(ctx context.Context, req *types.GetTotalRewardToDistributeRequest) (_ *types.GetTotalRewardToDistributeResponse, err error) {
+	defer metrics.RecordMetrics("GetTotalRewardToDistribute", time.Now(), &err)
+
 	totalReward, err := qs.k.GetTotalRewardToDistribute(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryTotalRewardToDistributeResponse{TotalReward: totalReward}, nil
+	return &types.GetTotalRewardToDistributeResponse{TotalReward: totalReward}, nil
 }

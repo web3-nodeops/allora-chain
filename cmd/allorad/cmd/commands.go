@@ -22,6 +22,7 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
+	"github.com/cosmos/cosmos-sdk/x/crisis"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
 	"github.com/allora-network/allora-chain/app"
@@ -34,6 +35,7 @@ func initRootCmd(rootCmd *cobra.Command, txConfig client.TxConfig, basicManager 
 		confixcmd.ConfigCommand(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
+		NewInPlaceTestnetCmd(addModuleInitFlags),
 	)
 
 	server.AddCommands(rootCmd, app.DefaultNodeHome, newApp, appExport, func(startCmd *cobra.Command) {})
@@ -48,8 +50,12 @@ func initRootCmd(rootCmd *cobra.Command, txConfig client.TxConfig, basicManager 
 	)
 }
 
+func addModuleInitFlags(startCmd *cobra.Command) {
+	crisis.AddModuleInitFlags(startCmd)
+}
+
 func queryCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	cmd := &cobra.Command{ // nolint: exhaustruct // dependency code don't want to change the way it works
 		Use:                        "query",
 		Aliases:                    []string{"q"},
 		Short:                      "Querying subcommands",
@@ -71,7 +77,7 @@ func queryCommand() *cobra.Command {
 }
 
 func txCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	cmd := &cobra.Command{ // nolint: exhaustruct // dependency code don't want to change the way it works
 		Use:                        "tx",
 		Short:                      "Transactions subcommands",
 		DisableFlagParsing:         false,

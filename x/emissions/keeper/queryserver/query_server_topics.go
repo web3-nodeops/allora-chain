@@ -2,8 +2,10 @@ package queryserver
 
 import (
 	"context"
+	"time"
 
 	"cosmossdk.io/errors"
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -11,16 +13,18 @@ import (
 )
 
 // NextTopicId is a monotonically increasing counter that is used to assign unique IDs to topics.
-func (qs queryServer) GetNextTopicId(ctx context.Context, req *types.QueryNextTopicIdRequest) (*types.QueryNextTopicIdResponse, error) {
+func (qs queryServer) GetNextTopicId(ctx context.Context, req *types.GetNextTopicIdRequest) (_ *types.GetNextTopicIdResponse, err error) {
+	defer metrics.RecordMetrics("GetNextTopicId", time.Now(), &err)
 	nextTopicId, err := qs.k.GetNextTopicId(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &types.QueryNextTopicIdResponse{NextTopicId: nextTopicId}, nil
+	return &types.GetNextTopicIdResponse{NextTopicId: nextTopicId}, nil
 }
 
-// Topics defines the handler for the Query/Topics RPC method.
-func (qs queryServer) GetTopic(ctx context.Context, req *types.QueryTopicRequest) (*types.QueryTopicResponse, error) {
+// Topics defines the handler for the Get/Topics RPC method.
+func (qs queryServer) GetTopic(ctx context.Context, req *types.GetTopicRequest) (_ *types.GetTopicResponse, err error) {
+	defer metrics.RecordMetrics("GetTopic", time.Now(), &err)
 	topic, err := qs.k.GetTopic(ctx, req.TopicId)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting topic")
@@ -43,7 +47,7 @@ func (qs queryServer) GetTopic(ctx context.Context, req *types.QueryTopicRequest
 		return nil, errors.Wrapf(err, "error getting current topic weight")
 	}
 
-	return &types.QueryTopicResponse{
+	return &types.GetTopicResponse{
 		Topic:            &topic,
 		Weight:           currentTopicWeight.String(),
 		EffectiveRevenue: currentTopicRevenue.String(),
@@ -51,119 +55,89 @@ func (qs queryServer) GetTopic(ctx context.Context, req *types.QueryTopicRequest
 }
 
 // Return last payload timestamp & nonce by worker/reputer
-func (qs queryServer) GetTopicLastWorkerCommitInfo(ctx context.Context, req *types.QueryTopicLastWorkerCommitInfoRequest) (*types.QueryTopicLastWorkerCommitInfoResponse, error) {
+func (qs queryServer) GetTopicLastWorkerCommitInfo(ctx context.Context, req *types.GetTopicLastWorkerCommitInfoRequest) (_ *types.GetTopicLastWorkerCommitInfoResponse, err error) {
+	defer metrics.RecordMetrics("GetTopicLastWorkerCommitInfo", time.Now(), &err)
 	lastCommit, err := qs.k.GetWorkerTopicLastCommit(ctx, req.TopicId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryTopicLastWorkerCommitInfoResponse{LastCommit: &lastCommit}, nil
+	return &types.GetTopicLastWorkerCommitInfoResponse{LastCommit: &lastCommit}, nil
 }
 
 // Return last payload timestamp & nonce by worker/reputer
-func (qs queryServer) GetTopicLastReputerCommitInfo(ctx context.Context, req *types.QueryTopicLastReputerCommitInfoRequest) (*types.QueryTopicLastReputerCommitInfoResponse, error) {
+func (qs queryServer) GetTopicLastReputerCommitInfo(ctx context.Context, req *types.GetTopicLastReputerCommitInfoRequest) (_ *types.GetTopicLastReputerCommitInfoResponse, err error) {
+	defer metrics.RecordMetrics("GetTopicLastReputerCommitInfo", time.Now(), &err)
 	lastCommit, err := qs.k.GetReputerTopicLastCommit(ctx, req.TopicId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryTopicLastReputerCommitInfoResponse{LastCommit: &lastCommit}, nil
+	return &types.GetTopicLastReputerCommitInfoResponse{LastCommit: &lastCommit}, nil
 }
 
-func (qs queryServer) GetTopicRewardNonce(
-	ctx context.Context,
-	req *types.QueryTopicRewardNonceRequest,
-) (
-	*types.QueryTopicRewardNonceResponse,
-	error,
-) {
+func (qs queryServer) GetTopicRewardNonce(ctx context.Context, req *types.GetTopicRewardNonceRequest) (_ *types.GetTopicRewardNonceResponse, err error) {
+	defer metrics.RecordMetrics("GetTopicRewardNonce", time.Now(), &err)
 	nonce, err := qs.k.GetTopicRewardNonce(ctx, req.TopicId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryTopicRewardNonceResponse{Nonce: nonce}, nil
+	return &types.GetTopicRewardNonceResponse{Nonce: nonce}, nil
 }
 
-func (qs queryServer) GetPreviousTopicWeight(
-	ctx context.Context,
-	req *types.QueryPreviousTopicWeightRequest,
-) (
-	*types.QueryPreviousTopicWeightResponse,
-	error,
-) {
+func (qs queryServer) GetPreviousTopicWeight(ctx context.Context, req *types.GetPreviousTopicWeightRequest) (_ *types.GetPreviousTopicWeightResponse, err error) {
+	defer metrics.RecordMetrics("GetPreviousTopicWeight", time.Now(), &err)
 	previousTopicWeight, notFound, err := qs.k.GetPreviousTopicWeight(ctx, req.TopicId)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryPreviousTopicWeightResponse{Weight: previousTopicWeight, NotFound: notFound}, nil
+	return &types.GetPreviousTopicWeightResponse{Weight: previousTopicWeight, NotFound: notFound}, nil
 }
 
-func (qs queryServer) TopicExists(
-	ctx context.Context,
-	req *types.QueryTopicExistsRequest,
-) (
-	*types.QueryTopicExistsResponse,
-	error,
-) {
+func (qs queryServer) GetTotalSumPreviousTopicWeights(ctx context.Context, req *types.GetTotalSumPreviousTopicWeightsRequest) (_ *types.GetTotalSumPreviousTopicWeightsResponse, err error) {
+	defer metrics.RecordMetrics("GetTotalSumPreviousTopicWeights", time.Now(), &err)
+	previousTopicWeight, err := qs.k.GetTotalSumPreviousTopicWeights(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.GetTotalSumPreviousTopicWeightsResponse{Weight: previousTopicWeight}, nil
+}
+
+func (qs queryServer) TopicExists(ctx context.Context, req *types.TopicExistsRequest) (_ *types.TopicExistsResponse, err error) {
+	defer metrics.RecordMetrics("TopicExists", time.Now(), &err)
 	exists, err := qs.k.TopicExists(ctx, req.TopicId)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryTopicExistsResponse{Exists: exists}, nil
+	return &types.TopicExistsResponse{Exists: exists}, nil
 }
 
-func (qs queryServer) IsTopicActive(
-	ctx context.Context,
-	req *types.QueryIsTopicActiveRequest,
-) (
-	*types.QueryIsTopicActiveResponse,
-	error,
-) {
+func (qs queryServer) IsTopicActive(ctx context.Context, req *types.IsTopicActiveRequest) (_ *types.IsTopicActiveResponse, err error) {
+	defer metrics.RecordMetrics("IsTopicActive", time.Now(), &err)
 	isActive, err := qs.k.IsTopicActive(ctx, req.TopicId)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryIsTopicActiveResponse{IsActive: isActive}, nil
+	return &types.IsTopicActiveResponse{IsActive: isActive}, nil
 }
 
-func (qs queryServer) GetTopicFeeRevenue(
-	ctx context.Context,
-	req *types.QueryTopicFeeRevenueRequest,
-) (
-	*types.QueryTopicFeeRevenueResponse,
-	error,
-) {
+func (qs queryServer) GetTopicFeeRevenue(ctx context.Context, req *types.GetTopicFeeRevenueRequest) (_ *types.GetTopicFeeRevenueResponse, err error) {
+	defer metrics.RecordMetrics("GetTopicFeeRevenue", time.Now(), &err)
 	feeRevenue, err := qs.k.GetTopicFeeRevenue(ctx, req.TopicId)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryTopicFeeRevenueResponse{FeeRevenue: feeRevenue}, nil
+	return &types.GetTopicFeeRevenueResponse{FeeRevenue: feeRevenue}, nil
 }
 
-func (qs queryServer) GetRewardableTopics(
-	ctx context.Context,
-	req *types.QueryRewardableTopicsRequest,
-) (
-	*types.QueryRewardableTopicsResponse,
-	error,
-) {
-	rewardableTopics, err := qs.k.GetRewardableTopics(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return &types.QueryRewardableTopicsResponse{RewardableTopicIds: rewardableTopics}, nil
-}
-
-func (qs queryServer) GetActiveTopicsAtBlock(
-	ctx context.Context,
-	req *types.QueryActiveTopicsAtBlockRequest,
-) (*types.QueryActiveTopicsAtBlockResponse, error) {
+func (qs queryServer) GetActiveTopicsAtBlock(ctx context.Context, req *types.GetActiveTopicsAtBlockRequest) (_ *types.GetActiveTopicsAtBlockResponse, err error) {
+	defer metrics.RecordMetrics("GetActiveTopicsAtBlock", time.Now(), &err)
 	activeTopicIds, err := qs.k.GetActiveTopicIdsAtBlock(ctx, req.BlockHeight)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -177,16 +151,14 @@ func (qs queryServer) GetActiveTopicsAtBlock(
 		topics = append(topics, &topic)
 	}
 
-	return &types.QueryActiveTopicsAtBlockResponse{Topics: topics}, nil
+	return &types.GetActiveTopicsAtBlockResponse{Topics: topics, Pagination: nil}, nil
 }
 
-func (qs queryServer) GetNextChurningBlockByTopicId(
-	ctx context.Context,
-	req *types.QueryNextChurningBlockByTopicIdRequest,
-) (*types.QueryNextChurningBlockByTopicIdResponse, error) {
+func (qs queryServer) GetNextChurningBlockByTopicId(ctx context.Context, req *types.GetNextChurningBlockByTopicIdRequest) (_ *types.GetNextChurningBlockByTopicIdResponse, err error) {
+	defer metrics.RecordMetrics("GetNextChurningBlockByTopicId", time.Now(), &err)
 	blockHeight, _, err := qs.k.GetNextPossibleChurningBlockByTopicId(ctx, req.TopicId)
 	if err != nil {
-		return &types.QueryNextChurningBlockByTopicIdResponse{BlockHeight: 0}, err
+		return &types.GetNextChurningBlockByTopicIdResponse{BlockHeight: 0}, err
 	}
-	return &types.QueryNextChurningBlockByTopicIdResponse{BlockHeight: blockHeight}, nil
+	return &types.GetNextChurningBlockByTopicIdResponse{BlockHeight: blockHeight}, nil
 }

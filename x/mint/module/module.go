@@ -8,7 +8,7 @@ import (
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/depinject"
-	modulev1 "github.com/allora-network/allora-chain/x/mint/api/module/v1"
+	modulev1 "github.com/allora-network/allora-chain/x/mint/api/mint/module/v1"
 	"github.com/allora-network/allora-chain/x/mint/keeper"
 	"github.com/allora-network/allora-chain/x/mint/types"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -24,12 +24,12 @@ import (
 const ConsensusVersion = 2
 
 var (
-	_ module.AppModuleBasic = AppModule{}
-	_ module.HasGenesis     = AppModule{}
-	_ module.HasServices    = AppModule{}
+	_ module.AppModuleBasic = AppModule{} //nolint:exhaustruct
+	_ module.HasGenesis     = AppModule{} //nolint:exhaustruct
+	_ module.HasServices    = AppModule{} //nolint:exhaustruct
 
-	_ appmodule.AppModule       = AppModule{}
-	_ appmodule.HasBeginBlocker = AppModule{}
+	_ appmodule.AppModule       = AppModule{} //nolint:exhaustruct
+	_ appmodule.HasBeginBlocker = AppModule{} //nolint:exhaustruct
 )
 
 // AppModuleBasic defines the basic application module used by the mint module.
@@ -106,7 +106,7 @@ func (am AppModule) IsAppModule() {}
 // RegisterServices registers a gRPC query service to respond to the
 // module-specific gRPC queries.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
-	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
+	types.RegisterMsgServiceServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 }
 
@@ -143,7 +143,7 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 //
 
 func init() {
-	appmodule.Register(&modulev1.Module{},
+	appmodule.Register(&modulev1.Module{FeeCollectorName: authtypes.FeeCollectorName},
 		appmodule.Provide(ProvideModule),
 	)
 }
@@ -188,5 +188,5 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 	// when no inflation calculation function is provided it will use the default types.DefaultInflationCalculationFn
 	m := NewAppModule(in.Cdc, k, in.AccountKeeper)
 
-	return ModuleOutputs{MintKeeper: k, Module: m}
+	return ModuleOutputs{MintKeeper: k, Module: m, Out: depinject.Out{}}
 }

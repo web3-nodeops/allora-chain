@@ -1,17 +1,93 @@
 package types
 
 import (
-	sdk "github.com/cosmos/cosmos-sdk/types"
+	cosmosMath "cosmossdk.io/math"
+	alloraMath "github.com/allora-network/allora-chain/math"
 )
 
 // NewGenesisState creates a new genesis state with default values.
 func NewGenesisState() *GenesisState {
 	return &GenesisState{
-		Params:            DefaultParams(),
-		CoreTeamAddresses: DefaultCoreTeamAddresses(),
+		Params:                                         DefaultParams(),
+		NextTopicId:                                    0,
+		Topics:                                         []*TopicIdAndTopic{},
+		ActiveTopics:                                   []uint64{},
+		RewardableTopics:                               []uint64{},
+		TopicWorkers:                                   []*TopicAndActorId{},
+		TopicReputers:                                  []*TopicAndActorId{},
+		TopicRewardNonce:                               []*TopicIdAndBlockHeight{},
+		InfererScoresByBlock:                           []*TopicIdBlockHeightScores{},
+		ForecasterScoresByBlock:                        []*TopicIdBlockHeightScores{},
+		ReputerScoresByBlock:                           []*TopicIdBlockHeightScores{},
+		InfererScoreEmas:                               []*TopicIdActorIdScore{},
+		ForecasterScoreEmas:                            []*TopicIdActorIdScore{},
+		ReputerScoreEmas:                               []*TopicIdActorIdScore{},
+		ReputerListeningCoefficient:                    []*TopicIdActorIdListeningCoefficient{},
+		PreviousReputerRewardFraction:                  []*TopicIdActorIdDec{},
+		PreviousInferenceRewardFraction:                []*TopicIdActorIdDec{},
+		PreviousForecastRewardFraction:                 []*TopicIdActorIdDec{},
+		PreviousForecasterScoreRatio:                   []*TopicIdAndDec{},
+		TotalStake:                                     cosmosMath.ZeroInt(),
+		TopicStake:                                     []*TopicIdAndInt{},
+		StakeReputerAuthority:                          []*TopicIdActorIdInt{},
+		StakeSumFromDelegator:                          []*TopicIdActorIdInt{},
+		DelegatedStakes:                                []*TopicIdDelegatorReputerDelegatorInfo{},
+		StakeFromDelegatorsUponReputer:                 []*TopicIdActorIdInt{},
+		DelegateRewardPerShare:                         []*TopicIdActorIdDec{},
+		StakeRemovalsByBlock:                           []*BlockHeightTopicIdReputerStakeRemovalInfo{},
+		StakeRemovalsByActor:                           []*ActorIdTopicIdBlockHeight{},
+		DelegateStakeRemovalsByBlock:                   []*BlockHeightTopicIdDelegatorReputerDelegateStakeRemovalInfo{},
+		DelegateStakeRemovalsByActor:                   []*DelegatorReputerTopicIdBlockHeight{},
+		Inferences:                                     []*TopicIdActorIdInference{},
+		Forecasts:                                      []*TopicIdActorIdForecast{},
+		Workers:                                        []*LibP2PKeyAndOffchainNode{},
+		Reputers:                                       []*LibP2PKeyAndOffchainNode{},
+		TopicFeeRevenue:                                []*TopicIdAndInt{},
+		PreviousTopicWeight:                            []*TopicIdAndDec{},
+		AllInferences:                                  []*TopicIdBlockHeightInferences{},
+		AllForecasts:                                   []*TopicIdBlockHeightForecasts{},
+		AllLossBundles:                                 []*TopicIdBlockHeightReputerValueBundles{},
+		NetworkLossBundles:                             []*TopicIdBlockHeightValueBundles{},
+		PreviousPercentageRewardToStakedReputers:       alloraMath.ZeroDec(),
+		UnfulfilledWorkerNonces:                        []*TopicIdAndNonces{},
+		UnfulfilledReputerNonces:                       []*TopicIdAndReputerRequestNonces{},
+		LatestInfererNetworkRegrets:                    []*TopicIdActorIdTimeStampedValue{},
+		LatestForecasterNetworkRegrets:                 []*TopicIdActorIdTimeStampedValue{},
+		LatestOneInForecasterNetworkRegrets:            []*TopicIdActorIdActorIdTimeStampedValue{},
+		LatestNaiveInfererNetworkRegrets:               []*TopicIdActorIdTimeStampedValue{},
+		LatestOneOutInfererInfererNetworkRegrets:       []*TopicIdActorIdActorIdTimeStampedValue{},
+		LatestOneOutInfererForecasterNetworkRegrets:    []*TopicIdActorIdActorIdTimeStampedValue{},
+		LatestOneOutForecasterInfererNetworkRegrets:    []*TopicIdActorIdActorIdTimeStampedValue{},
+		LatestOneOutForecasterForecasterNetworkRegrets: []*TopicIdActorIdActorIdTimeStampedValue{},
+		CoreTeamAddresses:                              DefaultCoreTeamAddresses(),
+		TopicLastWorkerCommit:                          []*TopicIdTimestampedActorNonce{},
+		TopicLastReputerCommit:                         []*TopicIdTimestampedActorNonce{},
+		OpenWorkerWindows:                              []*BlockHeightAndTopicIds{},
+		LastDripBlock:                                  []*TopicIdAndBlockHeight{},
+		TopicToNextPossibleChurningBlock:               []*TopicIdAndBlockHeight{},
+		BlockToActiveTopics:                            []*BlockHeightTopicIds{},
+		BlockToLowestActiveTopicWeight:                 []*BlockHeightTopicIdWeightPair{},
+		PreviousTopicQuantileInfererScoreEma:           []*TopicIdAndDec{},
+		PreviousTopicQuantileForecasterScoreEma:        []*TopicIdAndDec{},
+		PreviousTopicQuantileReputerScoreEma:           []*TopicIdAndDec{},
+		ActiveInferers:                                 []*TopicAndActorId{},
+		ActiveForecasters:                              []*TopicAndActorId{},
+		ActiveReputers:                                 []*TopicAndActorId{},
+		LowestInfererScoreEma:                          []*TopicIdActorIdScore{},
+		LowestForecasterScoreEma:                       []*TopicIdActorIdScore{},
+		LowestReputerScoreEma:                          []*TopicIdActorIdScore{},
+		LossBundles:                                    []*TopicIdReputerReputerValueBundle{},
+		CountInfererInclusionsInTopicActiveSet:         []*TopicIdActorIdUint64{},
+		CountForecasterInclusionsInTopicActiveSet:      []*TopicIdActorIdUint64{},
+		TotalSumPreviousTopicWeights:                   alloraMath.ZeroDec(),
+		RewardCurrentBlockEmission:                     cosmosMath.ZeroInt(),
 	}
 }
 
+// DefaultCoreTeamAddresses returns the default core team addresses
+// used for administration of params for the emissions module
+// long term should be managed by the standard cosmos-sdk
+// gov module
 func DefaultCoreTeamAddresses() []string {
 	return []string{
 		"allo16270t36amc3y6wk2wqupg6gvg26x6dc2nr5xwl",
@@ -25,21 +101,4 @@ func DefaultCoreTeamAddresses() []string {
 		"allo1uff55lgqpjkw2mlsx2q0p8q8z7k7p00w9s4s0f",
 		"allo136eeqhawxx66sjgsfeqk9gewq0e0msyu5tjmj3",
 	}
-}
-
-// Validate performs basic genesis state validation returning an error upon any
-func (gs *GenesisState) Validate() error {
-	if err := gs.Params.Validate(); err != nil {
-		return err
-	}
-
-	// Ensure that the core team addresses are valid
-	for _, addr := range gs.CoreTeamAddresses {
-		_, err := sdk.AccAddressFromBech32(addr)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

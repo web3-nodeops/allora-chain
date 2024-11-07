@@ -50,6 +50,9 @@ func TestDefaultParams(t *testing.T) {
 		DataSendingFee:                      cosmosMath.NewInt(10),
 		MaxElementsPerForecast:              uint64(12),
 		MaxActiveTopicsPerBlock:             uint64(1),
+		MaxStringLength:                     uint64(255),
+		InitialRegretQuantile:               alloraMath.MustNewDecFromString("0.25"),
+		PNormSafeDiv:                        alloraMath.MustNewDecFromString("8.25"),
 	}
 
 	params := DefaultParams()

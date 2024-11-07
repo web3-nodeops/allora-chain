@@ -2,85 +2,97 @@ package msgserver
 
 import (
 	"context"
+	"time"
 
 	errorsmod "cosmossdk.io/errors"
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 
 	"github.com/allora-network/allora-chain/x/emissions/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 // A tx function that accepts a individual loss and possibly returns an error
-func (ms msgServer) InsertReputerPayload(ctx context.Context, msg *types.MsgInsertReputerPayload) (*types.MsgInsertReputerPayloadResponse, error) {
-	_, err := sdk.AccAddressFromBech32(msg.Sender)
-	if err != nil {
-		return nil, err
-	}
-	err = checkInputLength(ctx, ms, msg)
+func (ms msgServer) InsertReputerPayload(ctx context.Context, msg *types.InsertReputerPayloadRequest) (_ *types.InsertReputerPayloadResponse, err error) {
+	defer metrics.RecordMetrics("InsertReputerPayload", time.Now(), &err)
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	err = ms.k.ValidateStringIsBech32(msg.Sender)
 	if err != nil {
 		return nil, err
 	}
 
-	blockHeight := sdk.UnwrapSDKContext(ctx).BlockHeight()
-
-	if err := msg.ReputerValueBundle.Validate(); err != nil {
+	blockHeight := sdkCtx.BlockHeight()
+	err = msg.ReputerValueBundle.Validate()
+	if err != nil {
 		return nil, errorsmod.Wrapf(err,
-			"Error validating reputer value bundle at block height: %d", blockHeight)
+			"Reputer invalid data for block: %d", blockHeight)
+	}
+
+	moduleParams, err := ms.k.GetParams(ctx)
+	if err != nil {
+		return nil, errorsmod.Wrapf(err, "Error getting params for sender: %v", &msg.Sender)
+	}
+	err = checkInputLength(moduleParams.MaxSerializedMsgLength, msg)
+	if err != nil {
+		return nil, err
 	}
 
 	nonce := msg.ReputerValueBundle.ValueBundle.ReputerRequestNonce
 	topicId := msg.ReputerValueBundle.ValueBundle.TopicId
-
-	// Check if the topic exists
-	topicExists, err := ms.k.TopicExists(ctx, topicId)
-	if err != nil || !topicExists {
-		return nil, types.ErrInvalidTopicId
-	}
-
-	// Check if the worker nonce is fulfilled
-	workerNonceUnfulfilled, err := ms.k.IsWorkerNonceUnfulfilled(ctx, topicId, nonce.ReputerNonce)
-	if err != nil {
-		return nil, err
-	}
-	// Returns an error if unfulfilled worker nonce exists
-	if workerNonceUnfulfilled {
-		return nil, types.ErrNonceStillUnfulfilled
-	}
-
-	// Check if the reputer nonce is unfulfilled
-	reputerNonceUnfulfilled, err := ms.k.IsReputerNonceUnfulfilled(ctx, topicId, nonce.ReputerNonce)
-	if err != nil {
-		return nil, err
-	}
-	// If the reputer nonce is already fulfilled, return an error
-	if !reputerNonceUnfulfilled {
-		return nil, types.ErrUnfulfilledNonceNotFound
-	}
 
 	topic, err := ms.k.GetTopic(ctx, topicId)
 	if err != nil {
 		return nil, types.ErrInvalidTopicId
 	}
 
-	// Check if the ground truth lag has passed: if blockheight > nonce.BlockHeight + topic.GroundTruthLag
-	if blockHeight < nonce.ReputerNonce.BlockHeight+topic.GroundTruthLag ||
-		blockHeight > nonce.ReputerNonce.BlockHeight+topic.GroundTruthLag*2 {
-		return nil, types.ErrReputerNonceWindowNotAvailable
+	workerNonceUnfulfilled, err := ms.k.IsWorkerNonceUnfulfilled(ctx, topicId, nonce.ReputerNonce)
+	if err != nil {
+		return nil, err
+	} else if workerNonceUnfulfilled {
+		return nil, errorsmod.Wrapf(types.ErrNonceStillUnfulfilled, "worker nonce")
 	}
 
-	// Before creating topic, transfer fee amount from creator to ecosystem bucket
-	params, err := ms.k.GetParams(ctx)
+	reputerNonceUnfulfilled, err := ms.k.IsReputerNonceUnfulfilled(ctx, topicId, nonce.ReputerNonce)
 	if err != nil {
-		return nil, errorsmod.Wrapf(err, "Error getting params for sender: %v", &msg.Sender)
+		return nil, err
+	} else if !reputerNonceUnfulfilled {
+		return nil, errorsmod.Wrapf(types.ErrUnfulfilledNonceNotFound, "reputer nonce")
 	}
-	err = sendEffectiveRevenueActivateTopicIfWeightSufficient(ctx, ms, msg.Sender, topicId, params.DataSendingFee)
+
+	if !ms.k.BlockWithinReputerSubmissionWindowOfNonce(topic, *nonce, blockHeight) {
+		return nil, errorsmod.Wrapf(
+			types.ErrReputerNonceWindowNotAvailable,
+			"Reputer window not open for topic: %d, current block %d, start window: %d, end window: %d",
+			topicId, blockHeight, nonce.ReputerNonce.BlockHeight+topic.GroundTruthLag, nonce.ReputerNonce.BlockHeight+topic.GroundTruthLag*2,
+		)
+	}
+
+	isRegistered, err := ms.k.IsReputerRegisteredInTopic(ctx, topicId, msg.ReputerValueBundle.ValueBundle.Reputer)
+	if err != nil {
+		return nil, err
+	} else if !isRegistered {
+		return nil, errorsmod.Wrapf(types.ErrAddressNotRegistered, "reputer is not registered in this topic")
+	}
+
+	// Check that the reputer enough stake in the topic
+	stake, err := ms.k.GetStakeReputerAuthority(ctx, topicId, msg.ReputerValueBundle.ValueBundle.Reputer)
+	if err != nil {
+		return nil, err
+	}
+	if stake.LT(moduleParams.RequiredMinimumStake) {
+		return nil, errorsmod.Wrapf(types.ErrInsufficientStake, "reputer does not have sufficient stake in the topic")
+	}
+
+	// Before accepting data, transfer fee amount from sender to ecosystem bucket
+	err = sendEffectiveRevenueActivateTopicIfWeightSufficient(ctx, ms, msg.Sender, topicId, moduleParams.DataSendingFee)
 	if err != nil {
 		return nil, err
 	}
 
-	err = ms.k.AppendReputerLoss(ctx, topicId, nonce.ReputerNonce.BlockHeight, msg.ReputerValueBundle)
+	err = ms.k.AppendReputerLoss(sdkCtx, topic, moduleParams, nonce.ReputerNonce.BlockHeight, msg.ReputerValueBundle)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.MsgInsertReputerPayloadResponse{}, nil
+	return &types.InsertReputerPayloadResponse{}, err
 }

@@ -3,15 +3,21 @@ package msgserver
 import (
 	"context"
 	"fmt"
+	"time"
 
+	errorsmod "cosmossdk.io/errors"
 	"github.com/allora-network/allora-chain/app/params"
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 // Registers a new network participant to the network for the first time for worker or reputer
-func (ms msgServer) Register(ctx context.Context, msg *types.MsgRegister) (*types.MsgRegisterResponse, error) {
-	if err := msg.Validate(); err != nil {
+func (ms msgServer) Register(ctx context.Context, msg *types.RegisterRequest) (_ *types.RegisterResponse, err error) {
+	defer metrics.RecordMetrics("Register", time.Now(), &err)
+
+	err = msg.Validate()
+	if err != nil {
 		return nil, err
 	}
 
@@ -21,6 +27,24 @@ func (ms msgServer) Register(ctx context.Context, msg *types.MsgRegister) (*type
 	}
 	if !topicExists {
 		return nil, types.ErrTopicDoesNotExist
+	}
+
+	if msg.IsReputer {
+		isRegistered, err := ms.k.IsReputerRegisteredInTopic(ctx, msg.TopicId, msg.Sender)
+		if err != nil {
+			return nil, err
+		}
+		if isRegistered {
+			return nil, errorsmod.Wrapf(types.ErrAddressAlreadyRegisteredInATopic, "reputer is already registered in this topic")
+		}
+	} else {
+		isRegistered, err := ms.k.IsWorkerRegisteredInTopic(ctx, msg.TopicId, msg.Sender)
+		if err != nil {
+			return nil, err
+		}
+		if isRegistered {
+			return nil, errorsmod.Wrapf(types.ErrAddressAlreadyRegisteredInATopic, "worker is already registered in this topic")
+		}
 	}
 
 	params, err := ms.k.GetParams(ctx)
@@ -49,15 +73,18 @@ func (ms msgServer) Register(ctx context.Context, msg *types.MsgRegister) (*type
 		}
 	}
 
-	return &types.MsgRegisterResponse{
+	return &types.RegisterResponse{
 		Success: true,
 		Message: "Node successfully registered",
 	}, nil
 }
 
 // Remove registration from a topic for worker or reputer
-func (ms msgServer) RemoveRegistration(ctx context.Context, msg *types.MsgRemoveRegistration) (*types.MsgRemoveRegistrationResponse, error) {
-	if err := msg.Validate(); err != nil {
+func (ms msgServer) RemoveRegistration(ctx context.Context, msg *types.RemoveRegistrationRequest) (_ *types.RemoveRegistrationResponse, err error) {
+	defer metrics.RecordMetrics("RemoveRegistration", time.Now(), &err)
+
+	err = msg.Validate()
+	if err != nil {
 		return nil, err
 	}
 	// Check if topic exists
@@ -103,22 +130,25 @@ func (ms msgServer) RemoveRegistration(ctx context.Context, msg *types.MsgRemove
 	}
 
 	// Return a successful response
-	return &types.MsgRemoveRegistrationResponse{
+	return &types.RemoveRegistrationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Node successfully removed from topic %d", msg.TopicId),
 	}, nil
 }
 
-func (ms msgServer) CheckBalanceForRegistration(ctx context.Context, address string) (bool, sdk.Coin, error) {
+func (ms msgServer) CheckBalanceForRegistration(ctx context.Context, address string) (success bool, fee sdk.Coin, err error) {
+	defer metrics.RecordMetrics("CheckBalanceForRegistration", time.Now(), &err)
+
 	moduleParams, err := ms.k.GetParams(ctx)
 	if err != nil {
 		return false, sdk.Coin{}, err
 	}
-	fee := sdk.NewCoin(params.DefaultBondDenom, moduleParams.RegistrationFee)
+	fee = sdk.NewCoin(params.DefaultBondDenom, moduleParams.RegistrationFee)
 	accAddress, err := sdk.AccAddressFromBech32(address)
 	if err != nil {
 		return false, fee, err
 	}
 	balance := ms.k.GetBankBalance(ctx, accAddress, fee.Denom)
-	return balance.IsGTE(fee), fee, nil
+	success = balance.IsGTE(fee)
+	return success, fee, err
 }

@@ -2,7 +2,9 @@ package queryserver
 
 import (
 	"context"
+	"time"
 
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -11,25 +13,31 @@ import (
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
-func (qs queryServer) GetWorkerNodeInfo(ctx context.Context, req *types.QueryWorkerNodeInfoRequest) (*types.QueryWorkerNodeInfoResponse, error) {
+func (qs queryServer) GetWorkerNodeInfo(ctx context.Context, req *types.GetWorkerNodeInfoRequest) (_ *types.GetWorkerNodeInfoResponse, err error) {
+	defer metrics.RecordMetrics("GetWorkerNodeInfo", time.Now(), &err)
+
 	node, err := qs.k.GetWorkerInfo(sdk.UnwrapSDKContext(ctx), req.Address)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryWorkerNodeInfoResponse{NodeInfo: &node}, nil
+	return &types.GetWorkerNodeInfoResponse{NodeInfo: &node}, nil
 }
 
-func (qs queryServer) GetReputerNodeInfo(ctx context.Context, req *types.QueryReputerNodeInfoRequest) (*types.QueryReputerNodeInfoResponse, error) {
+func (qs queryServer) GetReputerNodeInfo(ctx context.Context, req *types.GetReputerNodeInfoRequest) (_ *types.GetReputerNodeInfoResponse, err error) {
+	defer metrics.RecordMetrics("GetReputerNodeInfo", time.Now(), &err)
+
 	node, err := qs.k.GetReputerInfo(sdk.UnwrapSDKContext(ctx), req.Address)
 	if err != nil {
 		return nil, err
 	}
 
-	return &types.QueryReputerNodeInfoResponse{NodeInfo: &node}, nil
+	return &types.GetReputerNodeInfoResponse{NodeInfo: &node}, nil
 }
 
-func (qs queryServer) IsWorkerRegisteredInTopicId(ctx context.Context, req *types.QueryIsWorkerRegisteredInTopicIdRequest) (*types.QueryIsWorkerRegisteredInTopicIdResponse, error) {
+func (qs queryServer) IsWorkerRegisteredInTopicId(ctx context.Context, req *types.IsWorkerRegisteredInTopicIdRequest) (_ *types.IsWorkerRegisteredInTopicIdResponse, err error) {
+	defer metrics.RecordMetrics("IsWorkerRegisteredInTopicId", time.Now(), &err)
+
 	if err := qs.k.ValidateStringIsBech32(req.Address); err != nil {
 		return nil, sdkerrors.ErrInvalidAddress.Wrapf("invalid address: %s", err)
 	}
@@ -46,10 +54,12 @@ func (qs queryServer) IsWorkerRegisteredInTopicId(ctx context.Context, req *type
 		return nil, err
 	}
 
-	return &types.QueryIsWorkerRegisteredInTopicIdResponse{IsRegistered: isRegistered}, nil
+	return &types.IsWorkerRegisteredInTopicIdResponse{IsRegistered: isRegistered}, nil
 }
 
-func (qs queryServer) IsReputerRegisteredInTopicId(ctx context.Context, req *types.QueryIsReputerRegisteredInTopicIdRequest) (*types.QueryIsReputerRegisteredInTopicIdResponse, error) {
+func (qs queryServer) IsReputerRegisteredInTopicId(ctx context.Context, req *types.IsReputerRegisteredInTopicIdRequest) (_ *types.IsReputerRegisteredInTopicIdResponse, err error) {
+	defer metrics.RecordMetrics("IsReputerRegisteredInTopicId", time.Now(), &err)
+
 	if err := qs.k.ValidateStringIsBech32(req.Address); err != nil {
 		return nil, err
 	}
@@ -58,5 +68,5 @@ func (qs queryServer) IsReputerRegisteredInTopicId(ctx context.Context, req *typ
 		return nil, err
 	}
 
-	return &types.QueryIsReputerRegisteredInTopicIdResponse{IsRegistered: isRegistered}, nil
+	return &types.IsReputerRegisteredInTopicIdResponse{IsRegistered: isRegistered}, nil
 }

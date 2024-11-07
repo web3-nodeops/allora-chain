@@ -13,15 +13,15 @@ func TestExternalTestSuite(t *testing.T) {
 	}
 	t.Log(">>> Setting up connection to local node <<<")
 
-	seed := testCommon.LookupEnvInt(t, "SEED", 0)
-	rpcMode := testCommon.LookupRpcMode(t, "RPC_MODE", testCommon.SingleRpc)
-	rpcEndpoints := testCommon.LookupEnvStringArray("RPC_URLS", []string{"http://localhost:26657"})
+	seed := testCommon.LookupEnvIntWithDefault(t, "SEED", 0)
+	rpcMode := testCommon.LookupRpcModeWithDefault(t, "RPC_MODE", testCommon.SingleRpc)
+	rpcEndpoints := testCommon.LookupEnvStringArrayWithDefault(t, "RPC_URLS", []string{"http://localhost:26657"})
 
 	testConfig := testCommon.NewTestConfig(
 		t,
 		rpcMode,
 		rpcEndpoints,
-		"../devnet/genesis",
+		"../localnet/genesis",
 		seed,
 	)
 
@@ -51,15 +51,15 @@ func TestUpgradeTestSuite(t *testing.T) {
 	}
 	t.Log(">>> Setting up connection to local node <<<")
 
-	seed := testCommon.LookupEnvInt(t, "SEED", 0)
-	rpcMode := testCommon.LookupRpcMode(t, "RPC_MODE", testCommon.SingleRpc)
-	rpcEndpoints := testCommon.LookupEnvStringArray("RPC_URLS", []string{"http://localhost:26657"})
+	seed := testCommon.LookupEnvIntWithDefault(t, "SEED", 0)
+	rpcMode := testCommon.LookupRpcModeWithDefault(t, "RPC_MODE", testCommon.SingleRpc)
+	rpcEndpoints := testCommon.LookupEnvStringArrayWithDefault(t, "RPC_URLS", []string{"http://localhost:26657"})
 
 	testConfig := testCommon.NewTestConfig(
 		t,
 		rpcMode,
 		rpcEndpoints,
-		"../devnet/genesis",
+		"../localnet/genesis",
 		seed,
 	)
 

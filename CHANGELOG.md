@@ -41,7 +41,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for all versions `v1.0.0` and beyond (still considered experimental prior to v1.0.0).
 
-## [Unreleased] -- will be v0.4.0
+## vX.Y.Z - TEMPLATE
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [Unreleased]
+
+### Added
+
+* [#654](https://github.com/allora-network/allora-chain/pull/654) Reorganize Linter Folder, add linter to check fuzzer state transition probabilities add to 100 percent
+
+### Changed
+
+* [#652](https://github.com/allora-network/allora-chain/pull/652) Reduce code duplication, set local_testnet_upgrade_l1.sh using environment variables with local_testnet_l1.sh instead
+* [#650](https://github.com/allora-network/allora-chain/pull/650) Make fuzzer setup run through every state transition once before fuzzing starts
+* [#651](https://github.com/allora-network/allora-chain/pull/651) Refactor: Fuzzer rename invariants test to fuzz test
+* [#653](https://github.com/allora-network/allora-chain/pull/653) Fuzzer Bugfixes, Allow User to Set Fuzzer Transition Probability Distribution
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [Released]
+
+## v0.6.0
+
+### Added
+
+* [#624](https://github.com/allora-network/allora-chain/pull/624) Add `nurse` internal healthcheck service based on `pprof`.  See `health/README.md`.
+* [#642](https://github.com/allora-network/allora-chain/pull/642) Add release signing keys
+* [#648](https://github.com/allora-network/allora-chain/pull/648) Update emissions v5 migration to reset way more maps => complete cleanup of poisonously negative values
+
+### Changed
+
+* [#538](https://github.com/allora-network/allora-chain/pull/538) Refactor Inference Synthesis to use Functions instead of "Builder Pattern"
+* [#625](https://github.com/allora-network/allora-chain/pull/625) Determine what percentage of rewards to pay to each topic based on time-based accumulation rather than instantaneously.
+
+### Fixed
+
+* [#615](https://github.com/allora-network/allora-chain/pull/615) Improvement to merit-based sortition to enable more cycling through the crowd
+* [#615](https://github.com/allora-network/allora-chain/pull/615) Fixed runaway regret calculation where large influx of workers would cause the regret to grow negatively without bound
+* [#635](https://github.com/allora-network/allora-chain/pull/635) Fixed occasional nil pointer dereference bug when calling `GetNetworkInferences`. Also, actually filled in loss block height return value.
+
+### Added
+
+* [612](https://github.com/allora-network/allora-chain/pull/612) Load testnet state into local fork via in-place-testnet command 
+
+### Security
+
+* [#603](https://github.com/allora-network/allora-chain/pull/603) Validate all Values for Correctness Prior to Storing them in the Keeper
+* [#620](https://github.com/allora-network/allora-chain/pull/620) Add a static analyzer to detect non-deferred `.Close()` calls, improve migration error handling
+* [#622](https://github.com/allora-network/allora-chain/pull/622) Add telemetry metrics on queries/txs
+
+## v0.5.0
+
+### Summary
+
+1. Implement a fix for incomplete migration of topic fields from the v0.4.0 upgrade. 
+2. Add additional RPC endpoint to allow for recalculating 
+   the inflation rate / target emission rate more often than once per month.
+3. Update to use rewardable topics as active topics instead of using them separately.
+4. Other miscellaneous minor fixes
+
+### Added
+
+* [#584](https://github.com/allora-network/allora-chain/pull/584) Allow admins to force target emission recalculation on params update and via dedicated mint RPC endpoint
+* [#592](https://github.com/allora-network/allora-chain/pull/592) Update to use rewardable topics as active topics and rename `PickChurnableActiveTopics` to `UpdateNoncesOfActiveTopics`
+* [#602](https://github.com/allora-network/allora-chain/pull/602) Refactor: Fix query server proto v4 (refactors [#592](https://github.com/allora-network/allora-chain/pull/592))
+* [#607](https://github.com/allora-network/allora-chain/pull/607) Add events for building research monitoring suite
+
+### Fixed
+
+* [#582](https://github.com/allora-network/allora-chain/pull/582) Additional topic fields validation
+* [#587](https://github.com/allora-network/allora-chain/pull/587) Update Migration Tests to include NaN Initial Regrets Test
+* [#590](https://github.com/allora-network/allora-chain/pull/590) Clear NaN in maps by deleting all map values during migration
+* [#595](https://github.com/allora-network/allora-chain/pull/592) Emit inference and forecast score events in case of 1 actor
+* [#596](https://github.com/allora-network/allora-chain/pull/596) EMA protection against NaN values
+* [#598](https://github.com/allora-network/allora-chain/pull/598) Math Operations on NaNs Should Return Errors
+* [#604](https://github.com/allora-network/allora-chain/pull/604) Migration: clean additional stores. Ensure record pruning on reward failure. Autocli fix of multi-reputer-stake function.
+
+### Security
+
+* [#588](https://github.com/allora-network/allora-chain/pull/588)  Add String Max Length Module Parameter, Enforce Max String Length on Creation of New Topics
+* [#610](https://github.com/allora-network/allora-chain/pull/610) Ensure that BlockHeight of scores is consistently set to be a topic epoch nonce. Also simplify the condition for idempotent payload submission.
+
+## v0.4.0
 
 ### Summary
 
@@ -62,6 +160,7 @@ Implements fixes for our [June 2024](https://github.com/sherlock-audit/2024-06-a
 * [#547](https://github.com/allora-network/allora-chain/pull/547) Improve error handling on InsertPayload, fixed/added tests err handling
 * [#550](https://github.com/allora-network/allora-chain/pull/550) Fix reputer window upper limit
 * [#555](https://github.com/allora-network/allora-chain/pull/555) Refactor: Rename TestSuite names
+* [#567](https://github.com/allora-network/allora-chain/pull/567) Fix worker nonce window closing as soon as it opens
 
 ### Security
 

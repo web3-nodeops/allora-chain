@@ -10,7 +10,7 @@
 ![Go!](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 ![Apache License](https://img.shields.io/badge/Apache%20License-D22128?style=for-the-badge&logo=Apache&logoColor=white)
 
-The Allora Network is a state-of-the-art protocol that uses decentralized AI and machine learning (ML) to build, extract, and deploy predictions among its participants. It offers actors who wish to use AI predictions a formalized way to obtain the output of state-of-the-art ML models on-chain and to pay the operators of AI/ML nodes who create these predictions. That way, Allora bridges the information gap between data owners, data processors, AI/ML predictors, market analysts, and the end-users or consumers who have the means to execute on these insights.
+The [Allora Network](https://www.allora.network/) is a state-of-the-art protocol that uses decentralized AI and machine learning (ML) to build, extract, and deploy predictions among its participants. It offers actors who wish to use AI predictions a formalized way to obtain the output of state-of-the-art ML models on-chain and to pay the operators of AI/ML nodes who create these predictions. That way, Allora bridges the information gap between data owners, data processors, AI/ML predictors, market analysts, and the end-users or consumers who have the means to execute on these insights.
 
 The AI/ML agents within the Allora Network use their data and algorithms to broadcast their predictions across a peer-to-peer network, and they ingest these predictions to assess the predictions from all other agents. The network consensus mechanism combines these predictions and assessments, and distributes rewards to the agents according to the quality of their predictions and assessments. This carefully designed incentive mechanism enables Allora to continually learn and improve, adjusting to the market as it evolves.
 
@@ -52,6 +52,27 @@ allorad start
 When you run a node you have 2 options:
  - Run node and a Head, main advantage is - you can use the head for your workers and reputers
  - Run only a node, in this case you will use Allora's heads.
+
+## Run a Fork of Testnet/Mainnet State
+To run a fork of a testnet or mainnet in order to check changes against the database state for those networks, first set up some local `$HOME/.allorad/` config genesis, etc:
+
+```bash
+allorad init devnet
+allorad keys add test
+```
+
+Then copy an existing node snapshot of the `$HOME/.allorad/data/` folder to your new validator's same allorad home folder. You might use `allorad snapshots dump` to get a tar.gz snapshot.
+
+Next get the local validator key for your new validator:
+```bash
+allorad comet show-address
+```
+
+Start the node with an in-place-testnet, swapping the state of the node for the snapshot state. Put the comet address from the previous step:
+
+```bash
+allorad in-place-testnet devnet allovaloper<comet address> --home $HOME/.allorad --minimum-gas-prices 0uallo --skip-confirmation
+```
 
 ## Run a node with script
 `scripts/l1_node.sh`, you will see the log in the output of the script.
@@ -135,7 +156,7 @@ All the following command needs to be executed inside the validator container.
 Run `docker compose exec validator0 bash` to get shell of the validator.
 
 You can change `--moniker=...` with a human readable name you choose for your validator.
-and `--from=` - is the account name in the keyring, you can list all availble keys with `allorad --home=$APP_HOME keys --keyring-backend=test list`
+and `--from=` - is the account name in the keyring, you can list all available keys with `allorad --home=$APP_HOME keys --keyring-backend=test list`
 
 Create stake info file:
 ```bash
@@ -231,7 +252,7 @@ INTEGRATION=TRUE go test -timeout 10m ./test/integration/ -v
 To run upgrade tests, execute the following commands:
 
 ```bash
-bash test/local_testnet_upgrade_l1.sh
+DO_UPGRADE="true" UPGRADE_VERSION="v0.6.0" bash test/local_testnet_l1.sh
 UPGRADE=TRUE go test -timeout 10m ./test/integration/ -v
 ```
 

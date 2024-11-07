@@ -2,19 +2,23 @@ package msgserver
 
 import (
 	"context"
+	"time"
 
+	"github.com/allora-network/allora-chain/x/emissions/metrics"
 	"github.com/allora-network/allora-chain/x/emissions/types"
 )
 
-func (ms msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
-	if err := ms.k.ValidateStringIsBech32(msg.Sender); err != nil {
+func (ms msgServer) UpdateParams(ctx context.Context, msg *types.UpdateParamsRequest) (_ *types.UpdateParamsResponse, err error) {
+	defer metrics.RecordMetrics("UpdateParams", time.Now(), &err)
+
+	err = ms.k.ValidateStringIsBech32(msg.Sender)
+	if err != nil {
 		return nil, err
 	}
 	isAdmin, err := ms.k.IsWhitelistAdmin(ctx, msg.Sender)
 	if err != nil {
 		return nil, err
-	}
-	if !isAdmin {
+	} else if !isAdmin {
 		return nil, types.ErrNotWhitelistAdmin
 	}
 	existingParams, err := ms.k.GetParams(ctx)
@@ -143,6 +147,15 @@ func (ms msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams
 	if len(newParams.MaxActiveTopicsPerBlock) == 1 {
 		existingParams.MaxActiveTopicsPerBlock = newParams.MaxActiveTopicsPerBlock[0]
 	}
+	if len(newParams.MaxStringLength) == 1 {
+		existingParams.MaxStringLength = newParams.MaxStringLength[0]
+	}
+	if len(newParams.InitialRegretQuantile) == 1 {
+		existingParams.InitialRegretQuantile = newParams.InitialRegretQuantile[0]
+	}
+	if len(newParams.PNormSafeDiv) == 1 {
+		existingParams.PNormSafeDiv = newParams.PNormSafeDiv[0]
+	}
 	err = existingParams.Validate()
 	if err != nil {
 		return nil, err
@@ -151,5 +164,5 @@ func (ms msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams
 	if err != nil {
 		return nil, err
 	}
-	return &types.MsgUpdateParamsResponse{}, nil
+	return &types.UpdateParamsResponse{}, nil
 }

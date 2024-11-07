@@ -2,17 +2,17 @@ package module
 
 import (
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
-	statev3 "github.com/allora-network/allora-chain/x/emissions/api/v3"
+	statev5 "github.com/allora-network/allora-chain/x/emissions/api/emissions/v5"
 )
 
 // AutoCLIOptions implements the autocli.HasAutoCLIConfig interface.
 func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 	return &autocliv1.ModuleOptions{
 		Query: &autocliv1.ServiceCommandDescriptor{
-			Service: statev3.Query_ServiceDesc.ServiceName,
+			Service: statev5.QueryService_ServiceDesc.ServiceName,
 			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
 				{
-					RpcMethod: "Params",
+					RpcMethod: "GetParams",
 					Use:       "params",
 					Short:     "Get the current module parameters",
 				},
@@ -46,11 +46,6 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
-					RpcMethod: "GetRewardableTopics",
-					Use:       "rewardable-topics",
-					Short:     "Get Rewardable Topics",
-				},
-				{
 					RpcMethod: "GetReputerStakeInTopic",
 					Use:       "stake-in-topic-reputer [address] [topic_id]",
 					Short:     "Get reputer stake in a topic, including stake delegated to them in that topic",
@@ -79,7 +74,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "GetDelegateStakePlacement",
-					Use:       "delegate-reward-per-share [topic_id] [delegator] [target]",
+					Use:       "delegate-stake-placement [topic_id] [delegator] [target]",
 					Short:     "Get amount of token delegated to a target by a delegator in a topic",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "topic_id"},
@@ -162,8 +157,8 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
-					RpcMethod: "GetLatestAvailableNetworkInference",
-					Use:       "latest-available-network-inference [topic_id]",
+					RpcMethod: "GetLatestAvailableNetworkInferences",
+					Use:       "latest-available-network-inferences [topic_id]",
 					Short:     "Returns network inference only if all available information to compute the inference is present",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "topic_id"},
@@ -179,6 +174,22 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
+					RpcMethod: "GetPreviousTopicQuantileForecasterScoreEma",
+					Use:       "topic-quantile-forecaster-score [topic_id]",
+					Short:     "Returns topic-quantile score ema among the previous top forecasters by score EMA",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
+					RpcMethod: "GetCurrentLowestForecasterScore",
+					Use:       "current-lowest-forecaster-score [topic_id]",
+					Short:     "Returns current lowest score for a forecaster in a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
 					RpcMethod: "GetInfererScoreEma",
 					Use:       "inferer-score-ema [topic_id] [inferer]",
 					Short:     "Returns latest score for a inferer in a topic",
@@ -188,12 +199,44 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
+					RpcMethod: "GetPreviousTopicQuantileInfererScoreEma",
+					Use:       "topic-quantile-inferer-score [topic_id]",
+					Short:     "Returns topic-quantile score ema among the previous top inferers by score EMA",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
+					RpcMethod: "GetCurrentLowestInfererScore",
+					Use:       "current-lowest-inferer-score [topic_id]",
+					Short:     "Returns current lowest score for a inferer in a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
 					RpcMethod: "GetReputerScoreEma",
 					Use:       "reputer-score-ema [topic_id] [reputer]",
 					Short:     "Returns latest score for a reputer in a topic",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "topic_id"},
 						{ProtoField: "reputer"},
+					},
+				},
+				{
+					RpcMethod: "GetPreviousTopicQuantileReputerScoreEma",
+					Use:       "topic-quantile-reputer-score [topic_id]",
+					Short:     "Returns topic-quantile score ema among the previous top reputers by score EMA",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
+					RpcMethod: "GetCurrentLowestReputerScore",
+					Use:       "current-lowest-reputer-score [topic_id]",
+					Short:     "Returns current lowest score for a reputer in a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
 					},
 				},
 				{
@@ -215,7 +258,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "GetMultiReputerStakeInTopic",
-					Use:       "multi-coefficient [addresses] [topic_id]",
+					Use:       "multi-reputer-stake [addresses] [topic_id]",
 					Short:     "Returns stakes for each reputer in a given list. List can be up to MaxPageLimit in length. Default to 0 if does not exist",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "addresses"},
@@ -322,6 +365,12 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
+					RpcMethod:      "GetTotalSumPreviousTopicWeights",
+					Use:            "previous-total-topic-weights",
+					Short:          "Return previous total topic weights sum.",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{},
+				},
+				{
 					RpcMethod: "GetReputerLossBundlesAtBlock",
 					Use:       "reputer-loss-bundle [topic_id] [block_height]",
 					Short:     "Return reputer loss bundle at block height. May not exist if it was already pruned",
@@ -332,7 +381,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "GetReputersScoresAtBlock",
-					Use:       "reputer-scores [topic_id] [block_height]",
+					Use:       "reputer-scores-at-block [topic_id] [block_height]",
 					Short:     "Return reputer scores at block. Note: the chain only stores up to MaxSamplesToScaleScores many scores per actor type per topic",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "topic_id"},
@@ -341,7 +390,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "GetStakeRemovalForReputerAndTopicId",
-					Use:       "reputer-scores [reputer] [topic_id]",
+					Use:       "stake-removal [reputer] [topic_id]",
 					Short:     "Return stake removal information for reputer in topic",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "reputer"},
@@ -476,7 +525,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "GetReputerNodeInfo",
-					Use:       "reputer-info [addresss]",
+					Use:       "reputer-info [address]",
 					Short:     "Get node info for reputer node",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "address"},
@@ -524,8 +573,8 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
-					RpcMethod: "GetLatestNetworkInference",
-					Use:       "latest-network-inference [topic_id]",
+					RpcMethod: "GetLatestNetworkInferences",
+					Use:       "latest-network-inferences [topic_id]",
 					Short:     "Get the latest Network inferences and weights for a topic. Will return whatever information it has available.",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "topic_id"},
@@ -615,10 +664,56 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 						{ProtoField: "topic_id"},
 					},
 				},
+				{
+					RpcMethod: "GetActiveForecastersForTopic",
+					Use:       "active-forecasters [topic_id]",
+					Short:     "Get active forecasters for a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
+					RpcMethod: "GetActiveInferersForTopic",
+					Use:       "active-inferers [topic_id]",
+					Short:     "Get active inferers for a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				{
+					RpcMethod: "GetActiveReputersForTopic",
+					Use:       "active-reputers [topic_id]",
+					Short:     "Get active reputers for a topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+					},
+				},
+				// add inclusion methods
+				{
+					RpcMethod: "GetCountInfererInclusionsInTopic",
+					Use:       "count-inferer-inclusions-in-topic [topic_id] [inferer]",
+					Short:     "Get count of inferer inclusions in topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+						{ProtoField: "inferer"},
+					},
+				},
+				{
+					RpcMethod: "GetCountForecasterInclusionsInTopic",
+					Use:       "count-forecaster-inclusions-in-topic [topic_id] [forecaster]",
+					Short:     "Get count of forecaster inclusions in topic",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "topic_id"},
+						{ProtoField: "forecaster"},
+					},
+				},
 			},
+			SubCommands:          nil,
+			EnhanceCustomCommand: false,
+			Short:                "Emissions module query commands",
 		},
 		Tx: &autocliv1.ServiceCommandDescriptor{
-			Service: statev3.Msg_ServiceDesc.ServiceName,
+			Service: statev5.MsgService_ServiceDesc.ServiceName,
 			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
 				{
 					RpcMethod: "UpdateParams",
@@ -631,7 +726,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "CreateNewTopic",
-					Use:       "create-topic [creator] [metadata] [loss_method] [epoch_length] [ground_truth_lag] [worker_submission_window] [p_norm] [alpha_regret] [allow_negative] [epsilon]",
+					Use:       "create-topic [creator] [metadata] [loss_method] [epoch_length] [ground_truth_lag] [worker_submission_window] [p_norm] [alpha_regret] [allow_negative] [epsilon] [merit_sortition_alpha] [active_inferer_quantile] [active_forecaster_quantile] [active_reputer_quantile]",
 					Short:     "Add a new topic to the network",
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "creator"},
@@ -644,6 +739,10 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 						{ProtoField: "alpha_regret"},
 						{ProtoField: "allow_negative"},
 						{ProtoField: "epsilon"},
+						{ProtoField: "merit_sortition_alpha"},
+						{ProtoField: "active_inferer_quantile"},
+						{ProtoField: "active_forecaster_quantile"},
+						{ProtoField: "active_reputer_quantile"},
 					},
 				},
 				{
@@ -785,6 +884,9 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 			},
+			SubCommands:          nil,
+			EnhanceCustomCommand: false,
+			Short:                "Emissions module transaction commands",
 		},
 	}
 }
